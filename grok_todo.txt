@@ -1,0 +1,8 @@
+* Handle empty resource groups by assigning a default resource or skipping the task.
+* Optimize solver performance with additional parameters (e.g., more time, parallel workers).
+* Add a progress bar to the GUI to show scheduling progress for large datasets.
+* Add a button to view the current schedule in the GUI.
+* Add a confirmation dialog before clearing the schedule table.
+* Display the makespan in the GUI after scheduling. (op skedulering GUI)
+* Add error details to the GUI status label if scheduling fails.
+* Add a “Back” button to the GUI to return to the date selection screen after scheduling.
