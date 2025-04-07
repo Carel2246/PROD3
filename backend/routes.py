@@ -1,5 +1,6 @@
 from app import app, db, logger
-from models import Schedule, Calendar, Resource, ResourceGroup, ResourceGroupAssociation, Template, TemplateMaterial, TemplateTask
+from datetime import datetime
+from models import Schedule, Calendar, Resource, ResourceGroup, ResourceGroupAssociation, Template, TemplateMaterial, TemplateTask, Job, Task, Material
 from flask import jsonify, request
 
 @app.route('/')
@@ -216,7 +217,8 @@ def get_templates():
         return jsonify([{
             'id': t.id,
             'name': t.name,
-            'description': t.description
+            'description': t.description,
+            'price_each': t.price_each
         } for t in templates])
     except Exception as e:
         logger.error(f"Error fetching templates: {str(e)}")
@@ -228,7 +230,8 @@ def add_template():
         data = request.get_json()
         new_template = Template(
             name=data['name'],
-            description=data.get('description', '')
+            description=data.get('description', ''),
+            price_each=data.get('price_each', 0.0)
         )
         db.session.add(new_template)
         db.session.commit()
@@ -245,6 +248,7 @@ def update_template(id):
         template = Template.query.get_or_404(id)
         template.name = data['name']
         template.description = data.get('description', '')
+        template.price_each = data.get('price_each', 0.0)  # Added price_each
         db.session.commit()
         logger.info(f"Updated template with id {id}")
         return jsonify({'message': 'Template updated successfully'})
@@ -279,7 +283,7 @@ def get_template_materials(template_id):
         return jsonify([{
             'id': m.id,
             'template_id': m.template_id,
-            'material_name': m.material_name,
+            'description': m.description,  # Changed from material_name to description
             'quantity': m.quantity,
             'unit': m.unit
         } for m in materials])
@@ -293,7 +297,7 @@ def add_template_material():
         data = request.get_json()
         new_material = TemplateMaterial(
             template_id=data['template_id'],
-            material_name=data['material_name'],
+            description=data['description'],  # Changed from material_name to description
             quantity=data['quantity'],
             unit=data['unit']
         )
@@ -310,7 +314,7 @@ def update_template_material(id):
     try:
         data = request.get_json()
         material = TemplateMaterial.query.get_or_404(id)
-        material.material_name = data['material_name']
+        material.description = data['description']  # Changed from material_name to description
         material.quantity = data['quantity']
         material.unit = data['unit']
         db.session.commit()
@@ -318,18 +322,6 @@ def update_template_material(id):
         return jsonify({'message': 'Template material updated successfully'})
     except Exception as e:
         logger.error(f"Error updating template material: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/template_material/<int:id>', methods=['DELETE'], endpoint='delete_template_material')
-def delete_template_material(id):
-    try:
-        material = TemplateMaterial.query.get_or_404(id)
-        db.session.delete(material)
-        db.session.commit()
-        logger.info(f"Deleted template material with id {id}")
-        return jsonify({'message': 'Template material deleted successfully'})
-    except Exception as e:
-        logger.error(f"Error deleting template material: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 # Template Tasks Endpoints
@@ -408,3 +400,319 @@ def delete_template_task(id):
     except Exception as e:
         logger.error(f"Error deleting template task: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+# Job Endpoints
+@app.route('/api/job/<int:id>', methods=['GET', 'PUT', 'DELETE'], endpoint='manage_job')
+def manage_job(id):
+    if request.method == 'GET':
+        try:
+            logger.info(f"Fetching job with id {id}")
+            job = Job.query.get_or_404(id)
+            return jsonify({
+                'id': job.id,
+                'job_number': job.job_number,
+                'description': job.description,
+                'order_date': job.order_date.isoformat() if job.order_date else None,
+                'promised_date': job.promised_date.isoformat() if job.promised_date else None,
+                'quantity': job.quantity,
+                'price_each': job.price_each,
+                'customer': job.customer,
+                'completed': job.completed,
+                'blocked': job.blocked
+            })
+        except Exception as e:
+            logger.error(f"Error fetching job: {str(e)}")
+            return jsonify({'error': str(e)}), 404
+
+    elif request.method == 'PUT':
+        try:
+            data = request.get_json()
+            job = Job.query.get_or_404(id)
+            old_job_number = job.job_number
+            new_job_number = data['job_number']
+
+            # Check if the new job_number already exists (excluding the current job)
+            existing_job = Job.query.filter(Job.job_number == new_job_number, Job.id != id).first()
+            if existing_job:
+                logger.error(f"Job number {new_job_number} already exists for another job (ID: {existing_job.id})")
+                return jsonify({'error': f"Job number '{new_job_number}' already exists."}), 400
+
+            # Update the job_number in related Task and Material records first
+            if old_job_number != new_job_number:
+                # Update tasks
+                tasks = Task.query.filter_by(job_number=old_job_number).all()
+                for task in tasks:
+                    task.job_number = new_job_number
+                # Update materials
+                materials = Material.query.filter_by(job_number=old_job_number).all()
+                for material in materials:
+                    material.job_number = new_job_number
+
+            # Now update the job
+            job.job_number = new_job_number
+            job.description = data['description']
+            job.order_date = datetime.fromisoformat(data['order_date']) if data['order_date'] else None
+            job.promised_date = datetime.fromisoformat(data['promised_date']) if data['promised_date'] else None
+            job.quantity = data['quantity']
+            job.price_each = data['price_each']
+            job.customer = data['customer']
+            job.completed = data['completed']
+            job.blocked = data['blocked']
+
+            db.session.commit()
+            logger.info(f"Updated job with id {id}")
+            return jsonify({'message': 'Job updated successfully'})
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating job: {str(e)}")
+            return jsonify({'error': f"Failed to update job: {str(e)}"}), 500
+
+    elif request.method == 'DELETE':
+        try:
+            job = Job.query.get_or_404(id)
+            # Delete associated tasks
+            Task.query.filter_by(job_number=job.job_number).delete()
+            # Delete associated materials
+            Material.query.filter_by(job_number=job.job_number).delete()
+            # Delete the job
+            db.session.delete(job)
+            db.session.commit()
+            logger.info(f"Deleted job with id {id} and its associated tasks and materials")
+            return jsonify({'message': 'Job and associated records deleted successfully'})
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error deleting job: {str(e)}")
+            return jsonify({'error': f"Failed to delete job: {str(e)}"}), 500
+
+@app.route('/api/job', methods=['GET'], endpoint='get_jobs')
+def get_jobs():
+    try:
+        logger.info("Fetching job data")
+        # Get query parameters for filtering
+        include_completed = request.args.get('include_completed', 'false').lower() == 'true'
+        include_blocked = request.args.get('include_blocked', 'false').lower() == 'true'
+
+        query = Job.query
+        if not include_completed:
+            query = query.filter_by(completed=False)
+        if not include_blocked:
+            query = query.filter_by(blocked=False)
+
+        jobs = query.all()
+        return jsonify([{
+            'id': j.id,
+            'job_number': j.job_number,
+            'description': j.description,
+            'order_date': j.order_date.isoformat() if j.order_date else None,
+            'promised_date': j.promised_date.isoformat() if j.promised_date else None,
+            'quantity': j.quantity,
+            'price_each': j.price_each,
+            'customer': j.customer,
+            'completed': j.completed,
+            'blocked': j.blocked
+        } for j in jobs])
+    except Exception as e:
+        logger.error(f"Error fetching jobs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/job', methods=['POST'], endpoint='add_job')
+def add_job():
+    try:
+        data = request.get_json()
+        new_job = Job(
+            job_number=data['job_number'],
+            description=data['description'],
+            order_date=datetime.fromisoformat(data['order_date']) if data['order_date'] else None,
+            promised_date=datetime.fromisoformat(data['promised_date']) if data['promised_date'] else None,
+            quantity=data['quantity'],
+            price_each=data['price_each'],
+            customer=data['customer'],
+            completed=data['completed'],
+            blocked=data['blocked']
+        )
+        db.session.add(new_job)
+        db.session.commit()
+        logger.info("Added new job")
+        return jsonify({'message': 'Job added successfully', 'id': new_job.id}), 201
+    except Exception as e:
+        logger.error(f"Error adding job: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Task Endpoints
+@app.route('/api/task', methods=['GET'], endpoint='get_tasks')
+def get_tasks():
+    try:
+        logger.info("Fetching task data")
+        tasks = Task.query.join(Job, Task.job_number == Job.job_number).all()
+        return jsonify([{
+            'id': t.id,
+            'task_number': t.task_number,
+            'job_number': t.job_number,
+            'job_description': t.job.description,  # Added job description
+            'description': t.description,
+            'setup_time': t.setup_time,
+            'time_each': t.time_each,
+            'predecessors': t.predecessors,
+            'resources': t.resources,
+            'completed': t.completed
+        } for t in tasks])
+    except Exception as e:
+        logger.error(f"Error fetching tasks: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/task/<int:id>', methods=['PUT'], endpoint='update_task')
+def update_task(id):
+    try:
+        data = request.get_json()
+        task = Task.query.get_or_404(id)
+        task.task_number = data['task_number']
+        task.job_number = data['job_number']
+        task.description = data['description']
+        task.setup_time = data['setup_time']
+        task.time_each = data['time_each']
+        task.predecessors = data['predecessors']
+        task.resources = data['resources']
+        task.completed = data['completed']
+        db.session.commit()
+        logger.info(f"Updated task with id {id}")
+        return jsonify({'message': 'Task updated successfully'})
+    except Exception as e:
+        logger.error(f"Error updating task: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/task/by_job/<job_number>', methods=['GET'], endpoint='get_tasks_by_job')
+def get_tasks_by_job(job_number):
+    try:
+        logger.info(f"Fetching tasks for job {job_number}")
+        tasks = Task.query.filter_by(job_number=job_number).all()
+        return jsonify([{
+            'id': t.id,
+            'task_number': t.task_number,
+            'job_number': t.job_number,
+            'description': t.description,
+            'setup_time': t.setup_time,
+            'time_each': t.time_each,
+            'predecessors': t.predecessors,
+            'resources': t.resources,
+            'completed': t.completed
+        } for t in tasks])
+    except Exception as e:
+        logger.error(f"Error fetching tasks: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/task', methods=['POST'], endpoint='add_task')
+def add_task():
+    try:
+        data = request.get_json()
+        new_task = Task(
+            task_number=data['task_number'],
+            job_number=data['job_number'],
+            description=data['description'],
+            setup_time=data['setup_time'],
+            time_each=data['time_each'],
+            predecessors=data['predecessors'],
+            resources=data['resources'],
+            completed=data['completed']
+        )
+        db.session.add(new_task)
+        db.session.commit()
+        logger.info("Added new task")
+        return jsonify({'message': 'Task added successfully', 'id': new_task.id}), 201
+    except Exception as e:
+        logger.error(f"Error adding task: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/task/<int:id>', methods=['PUT', 'DELETE'], endpoint='manage_task')
+def manage_task(id):
+    if request.method == 'PUT':
+        try:
+            data = request.get_json()
+            task = Task.query.get_or_404(id)
+            task.task_number = data['task_number']
+            task.job_number = data['job_number']
+            task.description = data['description']
+            task.setup_time = data['setup_time']
+            task.time_each = data['time_each']
+            task.predecessors = data['predecessors']
+            task.resources = data['resources']
+            task.completed = data['completed']
+            db.session.commit()
+            logger.info(f"Updated task with id {id}")
+            return jsonify({'message': 'Task updated successfully'})
+        except Exception as e:
+            logger.error(f"Error updating task: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
+    elif request.method == 'DELETE':
+        try:
+            task = Task.query.get_or_404(id)
+            db.session.delete(task)
+            db.session.commit()
+            logger.info(f"Deleted task with id {id}")
+            return jsonify({'message': 'Task deleted successfully'})
+        except Exception as e:
+            logger.error(f"Error deleting task: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+    
+# Material Endpoints
+@app.route('/api/material/by_job/<job_number>', methods=['GET'], endpoint='get_materials_by_job')
+def get_materials_by_job(job_number):
+    try:
+        logger.info(f"Fetching materials for job {job_number}")
+        materials = Material.query.filter_by(job_number=job_number).all()
+        return jsonify([{
+            'id': m.id,
+            'job_number': m.job_number,
+            'description': m.description,
+            'quantity': m.quantity,
+            'unit': m.unit
+        } for m in materials])
+    except Exception as e:
+        logger.error(f"Error fetching materials: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/material', methods=['POST'], endpoint='add_material')
+def add_material():
+    try:
+        data = request.get_json()
+        new_material = Material(
+            job_number=data['job_number'],
+            description=data['description'],
+            quantity=data['quantity'],
+            unit=data['unit']
+        )
+        db.session.add(new_material)
+        db.session.commit()
+        logger.info("Added new material")
+        return jsonify({'message': 'Material added successfully', 'id': new_material.id}), 201
+    except Exception as e:
+        logger.error(f"Error adding material: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/material/<int:id>', methods=['PUT', 'DELETE'], endpoint='manage_material')
+def manage_material(id):
+    if request.method == 'PUT':
+        try:
+            data = request.get_json()
+            material = Material.query.get_or_404(id)
+            material.job_number = data['job_number']
+            material.description = data['description']
+            material.quantity = data['quantity']
+            material.unit = data['unit']
+            db.session.commit()
+            logger.info(f"Updated material with id {id}")
+            return jsonify({'message': 'Material updated successfully'})
+        except Exception as e:
+            logger.error(f"Error updating material: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
+    elif request.method == 'DELETE':
+        try:
+            material = Material.query.get_or_404(id)
+            db.session.delete(material)
+            db.session.commit()
+            logger.info(f"Deleted material with id {id}")
+            return jsonify({'message': 'Material deleted successfully'})
+        except Exception as e:
+            logger.error(f"Error deleting material: {str(e)}")
+            return jsonify({'error': str(e)}), 500

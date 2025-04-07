@@ -38,12 +38,13 @@ class Template(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(50), nullable=False)
     description = db.Column(db.String(255))
+    price_each = db.Column(db.Float, nullable=False, default=0.0)
 
 class TemplateMaterial(db.Model):
     __tablename__ = 'template_material'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     template_id = db.Column(db.Integer, db.ForeignKey('template.id'), nullable=False)
-    material_name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.String(255), nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     unit = db.Column(db.String(50), nullable=False)
     template = db.relationship('Template', backref='materials')
@@ -59,3 +60,38 @@ class TemplateTask(db.Model):
     predecessors = db.Column(db.String(255))
     resources = db.Column(db.String(255))
     template = db.relationship('Template', backref='tasks')
+
+class Job(db.Model):
+    __tablename__ = 'job'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_number = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.String(255), nullable=False)
+    order_date = db.Column(db.DateTime, nullable=False)
+    promised_date = db.Column(db.DateTime, nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    price_each = db.Column(db.Float, nullable=False)
+    customer = db.Column(db.String(100), nullable=False)
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    blocked = db.Column(db.Boolean, nullable=False, default=False)
+
+class Task(db.Model):
+    __tablename__ = 'task'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    task_number = db.Column(db.String(50), nullable=False)
+    job_number = db.Column(db.String(50), db.ForeignKey('job.job_number'), nullable=False)
+    description = db.Column(db.String(255), nullable=False)
+    setup_time = db.Column(db.Integer, nullable=False)
+    time_each = db.Column(db.Float, nullable=False)
+    predecessors = db.Column(db.String(255))
+    resources = db.Column(db.String(255))
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    job = db.relationship('Job', backref='tasks')
+
+class Material(db.Model):
+    __tablename__ = 'material'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_number = db.Column(db.String(50), db.ForeignKey('job.job_number'), nullable=False)
+    description = db.Column(db.String(255), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.String(50), nullable=False)
+    job = db.relationship('Job', backref='materials')

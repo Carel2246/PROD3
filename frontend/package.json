@@ -9,12 +9,14 @@
     "@testing-library/user-event": "^13.5.0",
     "axios": "^1.8.4",
     "bootstrap": "^5.3.3",
+    "dagre": "^0.8.5",
     "react": "^19.1.0",
     "react-big-calendar": "^1.18.0",
     "react-bootstrap": "^2.10.9",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.4.1",
     "react-scripts": "5.0.1",
+    "reactflow": "^11.11.4",
     "web-vitals": "^2.1.4"
   },
   "scripts": {

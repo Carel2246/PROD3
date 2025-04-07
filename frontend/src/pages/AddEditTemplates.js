@@ -5,9 +5,7 @@ import { Form, Button, Row, Col, Table } from 'react-bootstrap';
 const AddEditTemplates = () => {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [newTemplate, setNewTemplate] = useState({ name: '', description: '' });
-  const [materials, setMaterials] = useState([]);
-  const [newMaterial, setNewMaterial] = useState({ material_name: '', quantity: '', unit: '' });
+  const [templateData, setTemplateData] = useState({ id: '', name: '', price_each: '' });
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState({
     task_number: '',
@@ -17,133 +15,137 @@ const AddEditTemplates = () => {
     predecessors: '',
     resources: ''
   });
+  const [materials, setMaterials] = useState([]);
+  const [newMaterial, setNewMaterial] = useState({ description: '', quantity: '', unit: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Fetch all templates on component mount
   useEffect(() => {
+    const fetchTemplates = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await axios.get('http://localhost:5000/api/template');
+        setTemplates(response.data);
+        if (response.data.length > 0) {
+          setSelectedTemplateId(response.data[0].id.toString());
+          setTemplateData({
+            id: response.data[0].id,
+            name: response.data[0].name,
+            price_each: response.data[0].price_each
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching templates:', error);
+        setError('Failed to fetch templates. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchTemplates();
   }, []);
 
-  const fetchTemplates = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await axios.get('http://localhost:5000/api/template');
-      setTemplates(response.data);
-      if (response.data.length > 0) setSelectedTemplateId(response.data[0].id);
-    } catch (error) {
-      console.error('Error fetching templates:', error);
-      setError('Failed to fetch templates. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Fetch tasks and materials when a template is selected
   const fetchTemplateDetails = async (templateId) => {
-    if (!templateId) {
-      setMaterials([]);
+    if (!templateId || templateId === 'add') {
       setTasks([]);
-      setNewTemplate({ name: '', description: '' });
+      setMaterials([]);
+      setTemplateData({ id: '', name: '', price_each: '' });
       return;
     }
     try {
-      const [materialsResponse, tasksResponse] = await Promise.all([
-        axios.get(`http://localhost:5000/api/template_material/${templateId}`),
-        axios.get(`http://localhost:5000/api/template_task/${templateId}`)
+      const [tasksResponse, materialsResponse] = await Promise.all([
+        axios.get(`http://localhost:5000/api/template_task/${templateId}`).catch(err => {
+          console.error('Error fetching tasks:', err);
+          return { data: [] };
+        }),
+        axios.get(`http://localhost:5000/api/template_material/${templateId}`).catch(err => {
+          console.error('Error fetching materials:', err);
+          return { data: [] };
+        })
       ]);
-      setMaterials(materialsResponse.data);
       setTasks(tasksResponse.data);
+      setMaterials(materialsResponse.data);
       const template = templates.find(t => t.id === parseInt(templateId));
       if (template) {
-        setNewTemplate({ name: template.name, description: template.description });
-      } else {
-        setNewTemplate({ name: '', description: '' });
+        setTemplateData({
+          id: template.id,
+          name: template.name,
+          price_each: template.price_each
+        });
       }
     } catch (error) {
       console.error('Error fetching template details:', error);
-      if (error.response && error.response.status === 404) {
-        setMaterials([]);
-        setTasks([]);
-        setError(`Template with ID ${templateId} not found.`);
-      } else {
-        setError('Failed to fetch template details. Please try again.');
-      }
+      setError('Failed to fetch template details. Please try again.');
+      setTasks([]);
+      setMaterials([]);
     }
   };
 
   useEffect(() => {
     fetchTemplateDetails(selectedTemplateId);
-  }, [selectedTemplateId, templates]);
+  }, [selectedTemplateId]);
+
+  // Format price in ZAR (e.g., "R 1 234,56")
+  const formatPrice = (value) => {
+    if (!value && value !== 0) return 'R 0,00';
+    const num = parseFloat(value);
+    return `R ${num.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // Handle price input change (remove "R" and format)
+  const handlePriceChange = (e) => {
+    const value = e.target.value.replace(/[^0-9,.]/g, ''); // Allow numbers, commas, and dots
+    setTemplateData({ ...templateData, price_each: value });
+  };
 
   const handleAddTemplate = async () => {
     try {
-      const response = await axios.post('http://localhost:5000/api/template', newTemplate);
-      setTemplates([...templates, { id: response.data.id, ...newTemplate }]);
-      setSelectedTemplateId(response.data.id);
-      setNewTemplate({ name: '', description: '' });
+      const price = parseFloat(templateData.price_each) || 0.0;
+      const response = await axios.post('http://localhost:5000/api/template', {
+        name: templateData.name,
+        description: '',
+        price_each: price
+      });
+      const newTemplate = { id: response.data.id, name: templateData.name, price_each: price };
+      setTemplates([...templates, newTemplate]);
+      setSelectedTemplateId(response.data.id.toString());
+      setTemplateData({ id: response.data.id, name: templateData.name, price_each: price });
     } catch (error) {
       console.error('Error adding template:', error);
       setError('Failed to add template. Please try again.');
     }
   };
 
-  const handleUpdateTemplate = async (id) => {
+  const handleUpdateTemplate = async () => {
     try {
-      await axios.put(`http://localhost:5000/api/template/${id}`, newTemplate);
-      setTemplates(templates.map(t => (t.id === id ? { id, ...newTemplate } : t)));
+      const price = parseFloat(templateData.price_each) || 0.0;
+      await axios.put(`http://localhost:5000/api/template/${selectedTemplateId}`, {
+        name: templateData.name,
+        description: '',
+        price_each: price
+      });
+      setTemplates(templates.map(t => (t.id === parseInt(selectedTemplateId) ? { ...t, name: templateData.name, price_each: price } : t)));
     } catch (error) {
       console.error('Error updating template:', error);
       setError('Failed to update template. Please try again.');
     }
   };
 
-  const handleAddMaterial = async () => {
-    try {
-      const data = { ...newMaterial, template_id: selectedTemplateId, quantity: parseFloat(newMaterial.quantity) };
-      const response = await axios.post('http://localhost:5000/api/template_material', data);
-      setMaterials([...materials, { id: response.data.id, ...newMaterial, template_id: selectedTemplateId, quantity: parseFloat(newMaterial.quantity) }]);
-      setNewMaterial({ material_name: '', quantity: '', unit: '' });
-    } catch (error) {
-      console.error('Error adding material:', error);
-      setError('Failed to add material. Please try again.');
-    }
-  };
-
-  const handleUpdateMaterial = async (id) => {
-    try {
-      await axios.put(`http://localhost:5000/api/template_material/${id}`, {
-        ...newMaterial,
-        quantity: parseFloat(newMaterial.quantity),
-        template_id: selectedTemplateId
-      });
-      setMaterials(materials.map(m => (m.id === id ? { id, ...newMaterial, quantity: parseFloat(newMaterial.quantity) } : m)));
-      setNewMaterial({ material_name: '', quantity: '', unit: '' });
-    } catch (error) {
-      console.error('Error updating material:', error);
-      setError('Failed to update material. Please try again.');
-    }
-  };
-
-  const handleDeleteMaterial = async (id) => {
-    try {
-      await axios.delete(`http://localhost:5000/api/template_material/${id}`);
-      setMaterials(materials.filter(m => m.id !== id));
-    } catch (error) {
-      console.error('Error deleting material:', error);
-      setError('Failed to delete material. Please try again.');
-    }
-  };
-
   const handleAddTask = async () => {
     try {
       const data = {
-        ...newTask,
         template_id: selectedTemplateId,
+        task_number: newTask.task_number,
+        description: newTask.description,
         setup_time: parseInt(newTask.setup_time),
-        time_each: parseFloat(newTask.time_each)
+        time_each: parseFloat(newTask.time_each),
+        predecessors: newTask.predecessors,
+        resources: newTask.resources
       };
       const response = await axios.post('http://localhost:5000/api/template_task', data);
-      setTasks([...tasks, { id: response.data.id, ...newTask, template_id: selectedTemplateId, setup_time: parseInt(newTask.setup_time), time_each: parseFloat(newTask.time_each) }]);
+      setTasks([...tasks, { id: response.data.id, ...data }]);
       setNewTask({
         task_number: '',
         description: '',
@@ -158,36 +160,20 @@ const AddEditTemplates = () => {
     }
   };
 
-  const handleUpdateTask = async (id) => {
+  const handleAddMaterial = async () => {
     try {
-      await axios.put(`http://localhost:5000/api/template_task/${id}`, {
-        ...newTask,
+      const data = {
         template_id: selectedTemplateId,
-        setup_time: parseInt(newTask.setup_time),
-        time_each: parseFloat(newTask.time_each)
-      });
-      setTasks(tasks.map(t => (t.id === id ? { id, ...newTask, setup_time: parseInt(newTask.setup_time), time_each: parseFloat(newTask.time_each) } : t)));
-      setNewTask({
-        task_number: '',
-        description: '',
-        setup_time: '',
-        time_each: '',
-        predecessors: '',
-        resources: ''
-      });
+        description: newMaterial.description,
+        quantity: parseFloat(newMaterial.quantity),
+        unit: newMaterial.unit
+      };
+      const response = await axios.post('http://localhost:5000/api/template_material', data);
+      setMaterials([...materials, { id: response.data.id, ...data }]);
+      setNewMaterial({ description: '', quantity: '', unit: '' });
     } catch (error) {
-      console.error('Error updating task:', error);
-      setError('Failed to update task. Please try again.');
-    }
-  };
-
-  const handleDeleteTask = async (id) => {
-    try {
-      await axios.delete(`http://localhost:5000/api/template_task/${id}`);
-      setTasks(tasks.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Error deleting task:', error);
-      setError('Failed to delete task. Please try again.');
+      console.error('Error adding material:', error);
+      setError('Failed to add material. Please try again.');
     }
   };
 
@@ -197,155 +183,69 @@ const AddEditTemplates = () => {
     <div>
       <h2>Add/Edit Templates</h2>
       {error && <div className="alert alert-danger">{error}</div>}
+
+      {/* Template Form */}
       <Form className="mb-4">
         <Row>
           <Col>
-            <Form.Group controlId="templateSelect">
-              <Form.Label>Select Template</Form.Label>
+            <Form.Group controlId="templateId">
+              <Form.Label>ID</Form.Label>
               <Form.Control
-                as="select"
-                value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value === 'add' ? '' : e.target.value)}
-              >
-                <option value="add">Add New</option>
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </Form.Control>
+                type="text"
+                value={templateData.id}
+                disabled
+              />
             </Form.Group>
+          </Col>
+          <Col>
+            <Form.Group controlId="templateName">
+              <Form.Label>Name</Form.Label>
+              {selectedTemplateId === '' ? (
+                <Form.Control
+                  type="text"
+                  value={templateData.name}
+                  onChange={(e) => setTemplateData({ ...templateData, name: e.target.value })}
+                  placeholder="Enter template name"
+                />
+              ) : (
+                <Form.Control
+                  as="select"
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value === 'add' ? '' : e.target.value)}
+                >
+                  <option value="add">Add new template</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </Form.Control>
+              )}
+            </Form.Group>
+          </Col>
+          <Col>
+            <Form.Group controlId="priceEach">
+              <Form.Label>Price Each (ZAR)</Form.Label>
+              <Form.Control
+                type="text"
+                value={formatPrice(templateData.price_each)}
+                onChange={handlePriceChange}
+              />
+            </Form.Group>
+          </Col>
+          <Col className="align-self-end">
+            <Button
+              variant="primary"
+              onClick={selectedTemplateId === '' ? handleAddTemplate : handleUpdateTemplate}
+              disabled={!templateData.name}
+            >
+              {selectedTemplateId === '' ? 'Add Template' : 'Update Template'}
+            </Button>
           </Col>
         </Row>
       </Form>
 
-      {(!selectedTemplateId || selectedTemplateId === '') && (
-        <Form className="mb-4">
-          <Row>
-            <Col>
-              <Form.Group controlId="templateName">
-                <Form.Label>Name</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={newTemplate.name}
-                  onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
-                />
-              </Form.Group>
-            </Col>
-            <Col>
-              <Form.Group controlId="templateDescription">
-                <Form.Label>Description</Form.Label>
-                <Form.Control
-                  type="text"
-                  value={newTemplate.description}
-                  onChange={(e) => setNewTemplate({ ...newTemplate, description: e.target.value })}
-                />
-              </Form.Group>
-            </Col>
-            <Col className="align-self-end">
-              <Button variant="primary" onClick={handleAddTemplate} disabled={!newTemplate.name}>
-                Add Template
-              </Button>
-            </Col>
-          </Row>
-        </Form>
-      )}
-
+      {/* Only show subforms if a template is selected */}
       {selectedTemplateId && selectedTemplateId !== 'add' && (
         <div>
-          <Form className="mb-4">
-            <Row>
-              <Col>
-                <Form.Group controlId="editTemplateName">
-                  <Form.Label>Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={newTemplate.name}
-                    onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col>
-                <Form.Group controlId="editTemplateDescription">
-                  <Form.Label>Description</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={newTemplate.description}
-                    onChange={(e) => setNewTemplate({ ...newTemplate, description: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col className="align-self-end">
-                <Button variant="primary" onClick={() => handleUpdateTemplate(selectedTemplateId)} disabled={!newTemplate.name}>
-                  Update Template
-                </Button>
-              </Col>
-            </Row>
-          </Form>
-
-          {/* Materials Subform */}
-          <h3 className="mt-4">Materials</h3>
-          <Form className="mb-4">
-            <Row>
-              <Col>
-                <Form.Group controlId="materialName">
-                  <Form.Label>Material Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={newMaterial.material_name}
-                    onChange={(e) => setNewMaterial({ ...newMaterial, material_name: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col>
-                <Form.Group controlId="quantity">
-                  <Form.Label>Quantity</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={newMaterial.quantity}
-                    onChange={(e) => setNewMaterial({ ...newMaterial, quantity: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col>
-                <Form.Group controlId="unit">
-                  <Form.Label>Unit</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={newMaterial.unit}
-                    onChange={(e) => setNewMaterial({ ...newMaterial, unit: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col className="align-self-end">
-                <Button variant="primary" onClick={handleAddMaterial} disabled={!newMaterial.material_name || !newMaterial.quantity || !newMaterial.unit}>
-                  Add Material
-                </Button>
-              </Col>
-            </Row>
-          </Form>
-          <Table striped bordered hover responsive>
-            <thead>
-              <tr>
-                <th>Material Name</th>
-                <th>Quantity</th>
-                <th>Unit</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {materials.map(m => (
-                <tr key={m.id}>
-                  <td>{m.material_name}</td>
-                  <td>{m.quantity}</td>
-                  <td>{m.unit}</td>
-                  <td>
-                    <Button variant="warning" onClick={() => setNewMaterial(m)} className="me-2">Edit</Button>
-                    <Button variant="danger" onClick={() => handleDeleteMaterial(m.id)}>Delete</Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-
           {/* Tasks Subform */}
           <h3 className="mt-4">Tasks</h3>
           <Form className="mb-4">
@@ -411,7 +311,11 @@ const AddEditTemplates = () => {
                 </Form.Group>
               </Col>
               <Col className="align-self-end">
-                <Button variant="primary" onClick={handleAddTask} disabled={!newTask.task_number || !newTask.description || !newTask.setup_time || !newTask.time_each}>
+                <Button
+                  variant="primary"
+                  onClick={handleAddTask}
+                  disabled={!newTask.task_number || !newTask.description || !newTask.setup_time || !newTask.time_each}
+                >
                   Add Task
                 </Button>
               </Col>
@@ -420,28 +324,93 @@ const AddEditTemplates = () => {
           <Table striped bordered hover responsive>
             <thead>
               <tr>
+                <th>ID</th>
+                <th>Template ID</th>
                 <th>Task Number</th>
                 <th>Description</th>
                 <th>Setup Time</th>
                 <th>Time Each</th>
                 <th>Predecessors</th>
                 <th>Resources</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {tasks.map(t => (
                 <tr key={t.id}>
+                  <td>{t.id}</td>
+                  <td>{t.template_id}</td>
                   <td>{t.task_number}</td>
                   <td>{t.description}</td>
                   <td>{t.setup_time}</td>
                   <td>{t.time_each}</td>
                   <td>{t.predecessors}</td>
                   <td>{t.resources}</td>
-                  <td>
-                    <Button variant="warning" onClick={() => setNewTask(t)} className="me-2">Edit</Button>
-                    <Button variant="danger" onClick={() => handleDeleteTask(t.id)}>Delete</Button>
-                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+
+          {/* Materials Subform */}
+          <h3 className="mt-4">Materials</h3>
+          <Form className="mb-4">
+            <Row>
+              <Col>
+                <Form.Group controlId="description">
+                  <Form.Label>Description</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={newMaterial.description}
+                    onChange={(e) => setNewMaterial({ ...newMaterial, description: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+              <Col>
+                <Form.Group controlId="quantity">
+                  <Form.Label>Quantity</Form.Label>
+                  <Form.Control
+                    type="number"
+                    value={newMaterial.quantity}
+                    onChange={(e) => setNewMaterial({ ...newMaterial, quantity: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+              <Col>
+                <Form.Group controlId="unit">
+                  <Form.Label>Unit</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={newMaterial.unit}
+                    onChange={(e) => setNewMaterial({ ...newMaterial, unit: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+              <Col className="align-self-end">
+                <Button
+                  variant="primary"
+                  onClick={handleAddMaterial}
+                  disabled={!newMaterial.description || !newMaterial.quantity || !newMaterial.unit}
+                >
+                  Add Material
+                </Button>
+              </Col>
+            </Row>
+          </Form>
+          <Table striped bordered hover responsive>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {materials.map(m => (
+                <tr key={m.id}>
+                  <td>{m.id}</td>
+                  <td>{m.description}</td>
+                  <td>{m.quantity}</td>
+                  <td>{m.unit}</td>
                 </tr>
               ))}
             </tbody>
