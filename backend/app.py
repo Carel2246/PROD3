@@ -29,12 +29,15 @@ from routes import *
 @app.route('/<path:path>')
 def serve_react(path):
     build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/build'))
-    if path != "" and os.path.exists(os.path.join(build_dir, path)):
-        return send_from_directory(build_dir, path)
-    else:
-        return send_from_directory(build_dir, 'index.html')
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()  # Create tables if they don't exist
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Serve static assets like JS/CSS from the build/static folder
+    if path.startswith('static/'):
+        return send_from_directory(os.path.join(build_dir, 'static'), path[len('static/'):])
+
+    # Serve other files directly if they exist
+    full_path = os.path.join(build_dir, path)
+    if os.path.exists(full_path):
+        return send_from_directory(build_dir, path)
+
+    # Default: return index.html for React Router
+    return send_from_directory(build_dir, 'index.html')
