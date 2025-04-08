@@ -21,9 +21,6 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Import routes (do this after app initialization to avoid circular imports)
-from routes import *
-
 # Serve React static files
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
@@ -41,3 +38,6 @@ def serve_react(path):
 
     # Default: return index.html for React Router
     return send_from_directory(build_dir, 'index.html')
+
+# Import routes (do this after app initialization to avoid circular imports)
+from routes import *
