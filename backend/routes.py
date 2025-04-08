@@ -13,6 +13,7 @@ def get_schedule():
         logger.info("Fetching schedule data")
         schedules = Schedule.query.all()
         return jsonify([{
+            'id': s.id,  # Added id field
             'task_number': s.task_number,
             'start_time': s.start_time.isoformat(),
             'end_time': s.end_time.isoformat(),
@@ -598,6 +599,35 @@ def get_tasks_by_job(job_number):
         } for t in tasks])
     except Exception as e:
         logger.error(f"Error fetching tasks: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/task/by_task_number/<task_number>', methods=['GET'], endpoint='get_task_by_task_number')
+def get_task_by_task_number(task_number):
+    try:
+        logger.info(f"Fetching task with task_number {task_number}")
+        task = Task.query.filter_by(task_number=task_number).first()
+        if not task:
+            logger.warning(f"Task with task_number {task_number} not found")
+            return jsonify({'error': 'Task not found'}), 404
+        # Fetch the associated job to include job_id
+        job = Job.query.filter_by(job_number=task.job_number).first()
+        if not job:
+            logger.warning(f"Job with job_number {task.job_number} not found")
+            return jsonify({'error': 'Associated job not found'}), 404
+        return jsonify({
+            'id': task.id,
+            'task_number': task.task_number,
+            'job_number': task.job_number,
+            'job_id': job.id,  # Include job_id for fetching job details
+            'description': task.description,
+            'setup_time': task.setup_time,
+            'time_each': task.time_each,
+            'predecessors': task.predecessors,
+            'resources': task.resources,
+            'completed': task.completed
+        })
+    except Exception as e:
+        logger.error(f"Error fetching task: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/task', methods=['POST'], endpoint='add_task')

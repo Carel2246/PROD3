@@ -122,6 +122,40 @@ const AddEditJobs = () => {
   const [error, setError] = useState(null);
   const [flowchartElements, setFlowchartElements] = useState({ nodes: [], edges: [] });
 
+  const checkAndUpdateJobCompletion = async (jobId, tasks) => {
+    if (!jobId || !tasks || tasks.length === 0) return;
+  
+    // Check if all tasks are completed
+    const allTasksCompleted = tasks.every(task => task.completed);
+  
+    if (allTasksCompleted && !jobData.completed) {
+      try {
+        // Update the job's completed status to true
+        await axios.put(`http://localhost:5000/api/job/${jobId}`, {
+          ...jobData,
+          completed: true,
+        });
+        // Update the local jobData state to reflect the change
+        setJobData(prev => ({ ...prev, completed: true }));
+        // Refresh the jobs list to reflect the updated status
+        fetchJobs();
+        fetchAllJobs();
+      } catch (error) {
+        console.error('Error updating job completion status:', error);
+        setError('Failed to update job completion status. Please try again.');
+      }
+    }
+  };
+
+  const sortTasksBySequence = (tasks) => {
+    return [...tasks].sort((a, b) => {
+      // Extract the sequence from task_number (e.g., "25001-1" -> "1")
+      const sequenceA = parseInt(a.task_number.split('-')[1], 10);
+      const sequenceB = parseInt(b.task_number.split('-')[1], 10);
+      return sequenceA - sequenceB;
+    });
+  };
+
   useEffect(() => {
     fetchJobs();
     fetchAllJobs();
@@ -304,7 +338,11 @@ const AddEditJobs = () => {
           include_blocked: includeBlocked,
         },
       });
-      setJobs(response.data);
+      // Sort jobs by job_number
+      const sortedJobs = [...response.data].sort((a, b) =>
+        a.job_number.localeCompare(b.job_number, undefined, { numeric: true, sensitivity: 'base' })
+      );
+      setJobs(sortedJobs);
     } catch (error) {
       console.error('Error fetching jobs:', error);
       setError('Failed to fetch jobs. Please try again.');
@@ -347,8 +385,10 @@ const AddEditJobs = () => {
     if (!job) return;
     try {
       const response = await axios.get(`http://localhost:5000/api/task/by_job/${job.job_number}`);
-      const sortedTasks = response.data.sort((a, b) => a.id - b.id);
+      const sortedTasks = sortTasksBySequence(response.data); // Sort by sequence
       setTasks(sortedTasks);
+      // Check if all tasks are completed and update the job
+      await checkAndUpdateJobCompletion(jobId, sortedTasks);
     } catch (error) {
       console.error('Error fetching tasks:', error);
       setError('Failed to fetch tasks. Please try again.');
@@ -422,14 +462,18 @@ const AddEditJobs = () => {
       if (selectedJobId && selectedJobId !== 'add' && selectedJobId !== 'template' && selectedJobId !== 'copy') {
         await axios.put(`http://localhost:5000/api/job/${selectedJobId}`, jobData);
         await fetchJob(selectedJobId);
-        await fetchTasks(selectedJobId);
+        const updatedTasks = await fetchTasks(selectedJobId); // This will trigger checkAndUpdateJobCompletion
         await fetchMaterials(selectedJobId);
+        // Explicitly check again in case fetchTasks fails
+        await checkAndUpdateJobCompletion(selectedJobId, tasks);
       } else if (selectedJobId === 'add' || selectedJobId === 'template' || selectedJobId === 'copy') {
         const response = await axios.post('http://localhost:5000/api/job', jobData);
         setSelectedJobId(response.data.id);
         setJobData({ ...jobData, id: response.data.id });
-        await fetchTasks(response.data.id);
+        await fetchTasks(response.data.id); // This will trigger checkAndUpdateJobCompletion
         await fetchMaterials(response.data.id);
+        // Explicitly check again in case fetchTasks fails
+        await checkAndUpdateJobCompletion(response.data.id, tasks);
       }
       fetchJobs();
       fetchAllJobs();
@@ -459,7 +503,7 @@ const AddEditJobs = () => {
         completed: newTask.completed,
       };
       const response = await axios.post('http://localhost:5000/api/task', taskData);
-      const updatedTasks = [...tasks, { id: response.data.id, ...taskData }].sort((a, b) => a.id - b.id);
+      const updatedTasks = sortTasksBySequence([...tasks, { id: response.data.id, ...taskData }]); // Sort after adding
       setTasks(updatedTasks);
       setNewTask({
         task_sequence: '',
@@ -470,6 +514,8 @@ const AddEditJobs = () => {
         resources: '',
         completed: false,
       });
+      // Check if all tasks are completed and update the job
+      await checkAndUpdateJobCompletion(selectedJobId, updatedTasks);
       setError(null);
     } catch (error) {
       console.error('Error adding task:', error);
@@ -484,11 +530,13 @@ const AddEditJobs = () => {
   const handleSaveTask = async () => {
     try {
       await axios.put(`http://localhost:5000/api/task/${editTask.id}`, editTask);
-      const updatedTasks = tasks
-        .map((t) => (t.id === editTask.id ? editTask : t))
-        .sort((a, b) => a.id - b.id);
+      const updatedTasks = sortTasksBySequence(
+        tasks.map((t) => (t.id === editTask.id ? editTask : t))
+      ); // Sort after updating
       setTasks(updatedTasks);
       setEditTask(null);
+      // Check if all tasks are completed and update the job
+      await checkAndUpdateJobCompletion(selectedJobId, updatedTasks);
       setError(null);
     } catch (error) {
       console.error('Error updating task:', error);
@@ -499,10 +547,12 @@ const AddEditJobs = () => {
   const handleDeleteTask = async (taskId) => {
     try {
       await axios.delete(`http://localhost:5000/api/task/${taskId}`);
-      const updatedTasks = tasks
-        .filter((t) => t.id !== taskId)
-        .sort((a, b) => a.id - b.id);
+      const updatedTasks = sortTasksBySequence(
+        tasks.filter((t) => t.id !== taskId)
+      ); // Sort after deleting
       setTasks(updatedTasks);
+      // Check if all tasks are completed and update the job
+      await checkAndUpdateJobCompletion(selectedJobId, updatedTasks);
       setError(null);
     } catch (error) {
       console.error('Error deleting task:', error);
@@ -572,7 +622,7 @@ const AddEditJobs = () => {
       setError('Please enter a job number.');
       return;
     }
-
+  
     setIsCreatingJob(true);
     try {
       const jobsResponse = await axios.get('http://localhost:5000/api/job');
@@ -582,7 +632,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-
+  
       const templateResponse = await axios.get('http://localhost:5000/api/template');
       const template = templateResponse.data.find((t) => t.id === parseInt(selectedTemplateId));
       if (!template) {
@@ -590,7 +640,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-
+  
       const newJobData = {
         job_number: templateJobNumber,
         description: template.description,
@@ -604,14 +654,14 @@ const AddEditJobs = () => {
       };
       const createJobResponse = await axios.post('http://localhost:5000/api/job', newJobData);
       const newJobId = createJobResponse.data.id;
-
+  
       const templateTasksResponse = await axios.get(
         `http://localhost:5000/api/template_task/${selectedTemplateId}`
       );
       const templateMaterialsResponse = await axios.get(
         `http://localhost:5000/api/template_material/${selectedTemplateId}`
       );
-
+  
       const newTasks = [];
       for (const [index, t] of templateTasksResponse.data.entries()) {
         const taskNumber = `${newJobData.job_number}-${index + 1}`;
@@ -621,7 +671,7 @@ const AddEditJobs = () => {
           const newPredecessors = predecessorSequences.map((seq) => `${newJobData.job_number}-${seq}`);
           transformedPredecessors = newPredecessors.join(', ');
         }
-
+  
         const taskData = {
           task_number: taskNumber,
           job_number: newJobData.job_number,
@@ -635,7 +685,7 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/task', taskData);
         newTasks.push({ id: response.data.id, ...taskData });
       }
-
+  
       const newMaterials = [];
       for (const m of templateMaterialsResponse.data) {
         const materialData = {
@@ -647,14 +697,15 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/material', materialData);
         newMaterials.push({ id: response.data.id, ...materialData });
       }
-
+  
       setJobData({
         ...newJobData,
         id: newJobId,
         order_date: newJobData.order_date,
         promised_date: newJobData.promised_date,
       });
-      setTasks(newTasks.sort((a, b) => a.id - b.id));
+      const sortedTasks = sortTasksBySequence(newTasks); // Sort tasks by sequence
+      setTasks(sortedTasks);
       setMaterials(newMaterials);
       setSelectedJobId(newJobId);
       setShowTemplateModal(false);
@@ -679,7 +730,7 @@ const AddEditJobs = () => {
       setError('Please enter a job number.');
       return;
     }
-
+  
     setIsCreatingJob(true);
     try {
       const jobsResponse = await axios.get('http://localhost:5000/api/job');
@@ -689,7 +740,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-
+  
       const jobToCopyResponse = await axios.get(`http://localhost:5000/api/job/${selectedCopyJobId}`);
       const jobToCopy = jobToCopyResponse.data;
       if (!jobToCopy) {
@@ -697,7 +748,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-
+  
       const newJobData = {
         job_number: copyJobNumber,
         description: jobToCopy.description,
@@ -711,14 +762,14 @@ const AddEditJobs = () => {
       };
       const createJobResponse = await axios.post('http://localhost:5000/api/job', newJobData);
       const newJobId = createJobResponse.data.id;
-
+  
       const tasksToCopyResponse = await axios.get(
         `http://localhost:5000/api/task/by_job/${jobToCopy.job_number}`
       );
       const materialsToCopyResponse = await axios.get(
         `http://localhost:5000/api/material/by_job/${jobToCopy.job_number}`
       );
-
+  
       const newTasks = [];
       for (const t of tasksToCopyResponse.data) {
         const taskSequence = t.task_number.split('-')[1];
@@ -736,12 +787,12 @@ const AddEditJobs = () => {
               })
             : '',
           resources: t.resources,
-          completed: t.completed,
+          completed: false, // Set to false for all tasks in the new job
         };
         const response = await axios.post('http://localhost:5000/api/task', taskData);
         newTasks.push({ id: response.data.id, ...taskData });
       }
-
+  
       const newMaterials = [];
       for (const m of materialsToCopyResponse.data) {
         const materialData = {
@@ -753,14 +804,15 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/material', materialData);
         newMaterials.push({ id: response.data.id, ...materialData });
       }
-
+  
       setJobData({
         ...newJobData,
         id: newJobId,
         order_date: newJobData.order_date,
         promised_date: newJobData.promised_date,
       });
-      setTasks(newTasks.sort((a, b) => a.id - b.id));
+      const sortedTasks = sortTasksBySequence(newTasks); // Sort tasks by sequence
+      setTasks(sortedTasks);
       setMaterials(newMaterials);
       setSelectedJobId(newJobId);
       setShowCopyJobModal(false);
@@ -802,11 +854,15 @@ const AddEditJobs = () => {
                 <option value="add">Add new job</option>
                 <option value="template">Add from template</option>
                 <option value="copy">Copy previous job</option>
-                {jobs.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {`${job.job_number} - ${job.description} - ${job.customer}`}
-                  </option>
-                ))}
+                {[...jobs] // Create a copy of the jobs array
+                  .sort((a, b) =>
+                    a.job_number.localeCompare(b.job_number, undefined, { numeric: true, sensitivity: 'base' })
+                  ) // Sort by job_number
+                  .map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {`${job.job_number} - ${job.description} - ${job.customer}`}
+                    </option>
+                  ))}
               </Form.Control>
             </Form.Group>
           </Col>
