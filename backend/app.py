@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
@@ -23,6 +23,16 @@ db = SQLAlchemy(app)
 
 # Import routes (do this after app initialization to avoid circular imports)
 from routes import *
+
+# Serve React static files
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_react(path):
+    build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/build'))
+    if path != "" and os.path.exists(os.path.join(build_dir, path)):
+        return send_from_directory(build_dir, path)
+    else:
+        return send_from_directory(build_dir, 'index.html')
 
 if __name__ == '__main__':
     with app.app_context():
