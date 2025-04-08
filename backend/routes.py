@@ -3,10 +3,6 @@ from datetime import datetime
 from models import Schedule, Calendar, Resource, ResourceGroup, ResourceGroupAssociation, Template, TemplateMaterial, TemplateTask, Job, Task, Material
 from flask import jsonify, request
 
-@app.route('/')
-def home():
-    return "Timely Scheduler Backend"
-
 @app.route('/api/schedule', methods=['GET'])
 def get_schedule():
     try:
