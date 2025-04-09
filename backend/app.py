@@ -25,7 +25,7 @@ db = SQLAlchemy(app)
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
-    build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/build'))
+    build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'frontend'))
     static_dir = os.path.join(build_dir, 'static')
 
     if path.startswith('static/'):
