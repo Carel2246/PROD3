@@ -28,15 +28,17 @@ def serve_react(path):
     build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'frontend'))
     static_dir = os.path.join(build_dir, 'static')
 
-    if path.startswith('static/'):
-        return send_from_directory(static_dir, path[len('static/'):])
+    logger.info(f"Requested path: {path}")
 
-    # Serve favicon or other static files
+    if path.startswith('static/'):
+        # Strip only "static/" from the front of the path
+        subpath = path[len('static/'):]
+        return send_from_directory(static_dir, subpath)
+
     full_path = os.path.join(build_dir, path)
     if os.path.exists(full_path) and os.path.isfile(full_path):
         return send_from_directory(build_dir, path)
 
-    # All other routes should return index.html (for React Router)
     return send_from_directory(build_dir, 'index.html')
 
 # Import routes (do this after app initialization to avoid circular imports)
