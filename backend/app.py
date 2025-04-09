@@ -26,17 +26,17 @@ db = SQLAlchemy(app)
 @app.route('/<path:path>')
 def serve_react(path):
     build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/build'))
+    static_dir = os.path.join(build_dir, 'static')
 
-    # Serve static assets like JS/CSS from the build/static folder
     if path.startswith('static/'):
-        return send_from_directory(os.path.join(build_dir, 'static'), path[len('static/'):])
+        return send_from_directory(static_dir, path[len('static/'):])
 
-    # Serve other files directly if they exist
+    # Serve favicon or other static files
     full_path = os.path.join(build_dir, path)
-    if os.path.exists(full_path):
+    if os.path.exists(full_path) and os.path.isfile(full_path):
         return send_from_directory(build_dir, path)
 
-    # Default: return index.html for React Router
+    # All other routes should return index.html (for React Router)
     return send_from_directory(build_dir, 'index.html')
 
 # Import routes (do this after app initialization to avoid circular imports)
