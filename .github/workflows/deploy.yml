@@ -53,6 +53,8 @@ jobs:
           cp -r frontend/build/* deploy/frontend/
           # Copy requirements.txt
           cp backend/requirements.txt deploy/
+          # Create startup command file
+          echo "gunicorn --bind=0.0.0.0 --timeout 600 app:app" > deploy/startup.txt
 
       # Deploy using Azure Web App Deploy Action
       - name: Deploy to Azure Web App

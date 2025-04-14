@@ -4,12 +4,19 @@ from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 import os
 import logging
+import sys
 
 # Load env
 load_dotenv()
 
-# Logging
-logging.basicConfig(level=logging.INFO)
+# Enhanced logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Flask app
@@ -55,3 +62,12 @@ def serve_index():
 
 # Load routes
 from routes import *
+
+if __name__ == '__main__':
+    logger.info("Starting application...")
+    try:
+        port = int(os.getenv('PORT', 5000))
+        app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.error(f"Error starting application: {e}")
+        raise
