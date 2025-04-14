@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import logging
 
-# Load environment variables
+# Load environment variables from .env if present
 load_dotenv()
 
 # Configure logging
@@ -17,11 +17,14 @@ app = Flask(__name__)
 CORS(app)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+db_url = os.getenv('DATABASE_URL')
+if not db_url:
+    raise RuntimeError("DATABASE_URL is not set in environment.")
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Serve React static files
+# React static file serving
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
@@ -32,19 +35,25 @@ def serve_react(path):
     logger.info(f"[serve_react] build_dir: {build_dir}")
     logger.info(f"[serve_react] static_dir: {static_dir}")
 
+    # Serve static files under /static
     if path.startswith('static/'):
-        subpath = path[len('static/'):]
-        logger.info(f"[serve_react] Serving static file: {subpath}")
-        return send_from_directory(static_dir, subpath)
+        subpath = path[7:]  # remove 'static/' prefix
+        file_path = os.path.join(static_dir, subpath)
+        logger.info(f"[serve_react] Serving from static: {file_path}")
+        if os.path.exists(file_path):
+            return send_from_directory(static_dir, subpath)
+        else:
+            logger.warning(f"[serve_react] Static file not found: {file_path}")
 
-    # Serve favicon, manifest, other top-level assets
+    # Serve top-level files (manifest.json, logo, etc.)
     full_path = os.path.join(build_dir, path)
     if os.path.exists(full_path) and os.path.isfile(full_path):
-        logger.info(f"[serve_react] Serving file directly: {path}")
+        logger.info(f"[serve_react] Serving top-level file: {full_path}")
         return send_from_directory(build_dir, path)
 
+    # Fallback for React Router
     logger.info("[serve_react] Falling back to index.html")
     return send_from_directory(build_dir, 'index.html')
 
-# Import routes (do this after app initialization to avoid circular imports)
+# Import API routes
 from routes import *
