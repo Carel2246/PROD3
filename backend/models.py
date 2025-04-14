@@ -1,4 +1,5 @@
 from app import db
+from datetime import time, date
 
 class Schedule(db.Model):
     __tablename__ = 'schedule'
@@ -7,6 +8,14 @@ class Schedule(db.Model):
     start_time = db.Column(db.DateTime, nullable=False)
     end_time = db.Column(db.DateTime, nullable=False)
     resources_used = db.Column(db.String, nullable=False)
+
+class Holiday(db.Model):
+    __tablename__ = 'holidays'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, unique=True)
+    start_time = db.Column(db.Time)
+    end_time = db.Column(db.Time)
+    resources = db.Column(db.JSON)
 
 class Calendar(db.Model):
     __tablename__ = 'calendar'

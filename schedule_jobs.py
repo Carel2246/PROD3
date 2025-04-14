@@ -1,6 +1,6 @@
 from ortools.sat.python import cp_model
 import pandas as pd
-from fetch_data import fetch_data  # Import the fetch_data function
+from fetch_data import fetch_data
 from datetime import datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy import create_engine
@@ -15,10 +15,10 @@ from io import StringIO
 import random
 import time
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Retrieve database credentials from environment variables
+# Database credentials
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
@@ -29,66 +29,79 @@ DB_PORT = os.getenv("DB_PORT")
 connection_string = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(connection_string)
 
-# Function to convert time strings (e.g., "08:00:00") to minutes since midnight
+# Convert time strings to minutes since midnight
 def time_to_minutes(time_str):
-    if pd.isna(time_str):
+    if pd.isna(time_str) or not time_str:
         return 0
     time_obj = datetime.strptime(str(time_str), "%H:%M:%S")
     return time_obj.hour * 60 + time_obj.minute
 
-# Function to map elapsed minutes to a datetime, respecting working hours
-def elapsed_minutes_to_datetime(elapsed_minutes, start_date, working_hours):
+# Map elapsed minutes to datetime, respecting working hours and holidays
+def elapsed_minutes_to_datetime(elapsed_minutes, start_date, working_hours, holidays):
     current_date = start_date
     remaining_minutes = elapsed_minutes
     total_minutes = 0
-    start_minutes = 0  # Initialize to avoid UnboundLocalError
-    max_days = 365  # Arbitrary limit to prevent infinite loops
+    max_days = 365
 
     day_count = 0
     while remaining_minutes > 0 and day_count < max_days:
-        # Determine the weekday for the current date (1 = Monday, 7 = Sunday)
-        weekday = current_date.isoweekday()  # 1 = Monday, 7 = Sunday
-        start_minutes, end_minutes = working_hours.get(weekday, (0, 0))
+        # Check holidays first
+        holiday = holidays.get(current_date)
+        if holiday:
+            if holiday['resources'] and holiday['start_time'] is None and holiday['end_time'] is None:
+                # Resource-specific holiday, handled in scheduling logic
+                start_minutes, end_minutes = working_hours.get(current_date.isoweekday(), (0, 0))
+            elif holiday['start_time'] is None and holiday['end_time'] is None:
+                # Full holiday, no working hours
+                current_date += timedelta(days=1)
+                day_count += 1
+                continue
+            else:
+                # Holiday with specific hours
+                start_minutes = time_to_minutes(holiday['start_time'])
+                end_minutes = time_to_minutes(holiday['end_time'])
+        else:
+            # Regular day
+            weekday = current_date.isoweekday()
+            start_minutes, end_minutes = working_hours.get(weekday, (0, 0))
 
-        if start_minutes == end_minutes:  # Non-working day
+        if start_minutes == end_minutes:
             current_date += timedelta(days=1)
             day_count += 1
             continue
 
-        # Calculate available minutes in the current day
         day_start = total_minutes
         day_end = total_minutes + (end_minutes - start_minutes)
 
         if remaining_minutes <= (end_minutes - start_minutes):
-            # The elapsed minute falls within this day
             minutes_into_day = start_minutes + remaining_minutes
             return current_date + timedelta(minutes=minutes_into_day)
 
-        # Move to the next day
         remaining_minutes -= (end_minutes - start_minutes)
         total_minutes += (end_minutes - start_minutes)
         current_date += timedelta(days=1)
         day_count += 1
 
-    # If we run out of days or no working day is found, find the next working day
     while day_count < max_days:
+        holiday = holidays.get(current_date)
+        if holiday and holiday['start_time'] is not None and holiday['end_time'] is not None:
+            start_minutes = time_to_minutes(holiday['start_time'])
+            return current_date + timedelta(minutes=start_minutes)
         weekday = current_date.isoweekday()
         start_minutes, end_minutes = working_hours.get(weekday, (0, 0))
-        if start_minutes != end_minutes:  # Working day found
+        if start_minutes != end_minutes:
             return current_date + timedelta(minutes=start_minutes)
         current_date += timedelta(days=1)
         day_count += 1
 
-    # Fallback: return the start_date if no working day is found within max_days
-    print(f"Warning: Could not find a working day within {max_days} days from {start_date}. Returning start_date.")
+    print(f"Warning: Could not find a working day within {max_days} days from {start_date}.")
     return start_date
 
 # Main scheduling function
 def schedule_jobs(start_date, output_buffer):
-    # Redirect print statements to the output buffer
     sys.stdout = output_buffer
 
-    # Fetch data from the database
+    # Fetch data
     data = fetch_data()
     if data is None:
         print("Failed to fetch data. Exiting.")
@@ -101,10 +114,22 @@ def schedule_jobs(start_date, output_buffer):
     resource_mapping = data["resource_mapping"]
     resource_group_mapping = data["resource_group_mapping"]
 
-    # Step 1: Prepare working hours from calendar
+    # Fetch holidays
+    with engine.connect() as conn:
+        holidays_df = pd.read_sql("SELECT * FROM holidays", conn)
+    holidays = {
+        row['date']: {
+            'start_time': row['start_time'],
+            'end_time': row['end_time'],
+            'resources': row['resources'] if pd.notna(row['resources']) else []
+        }
+        for _, row in holidays_df.iterrows()
+    }
+
+    # Prepare working hours
     working_hours = {}
     for _, row in calendar_df.iterrows():
-        day = row["weekday"]  # 1 to 7 (Monday to Sunday)
+        day = row["weekday"]
         start_minutes = time_to_minutes(row["start_time"])
         end_minutes = time_to_minutes(row["end_time"])
         working_hours[day] = (start_minutes, end_minutes)
@@ -117,13 +142,12 @@ def schedule_jobs(start_date, output_buffer):
         else:
             print(f"  Day {day}: No working hours")
 
-    # Step 2: Compute task durations and organize tasks by job
+    # Compute task durations and organize tasks by job
     job_tasks = {}
     all_tasks = []
     task_to_index = {}
     index = 0
 
-    # Debug: Check for cycles in predecessor relationships
     def detect_cycle(task_id, visited, stack, task_to_index, all_tasks):
         if task_id not in task_to_index:
             return False
@@ -147,47 +171,31 @@ def schedule_jobs(start_date, output_buffer):
         stack[task_idx] = False
         return False
 
-    # Filter jobs: exclude completed or blocked jobs
     eligible_jobs = jobs_df[(jobs_df["completed"] == False) & (jobs_df["blocked"] == False)]
-    print("\nEligible Jobs (not completed and not blocked):")
+    print("\nEligible Jobs:")
     for _, job in eligible_jobs.iterrows():
-        print(f"  Job {job['job_number']}: ID={job['id']}, Completed={job['completed']}, Blocked={job['blocked']}")
+        print(f"  Job {job['job_number']}: ID={job['id']}")
 
     for job_id in eligible_jobs["id"]:
         job_number = eligible_jobs[eligible_jobs["id"] == job_id]["job_number"].iloc[0]
         quantity = eligible_jobs[eligible_jobs["id"] == job_id]["quantity"].iloc[0]
         job_tasks[job_number] = []
 
-        # Get tasks for this job
         job_tasks_df = tasks_df[tasks_df["job_number"] == job_number]
-        # Filter tasks: exclude completed tasks
         eligible_tasks = job_tasks_df[job_tasks_df["completed"] == False]
         print(f"\nTasks for Job {job_number}:")
         for _, task in job_tasks_df.iterrows():
-            if task["completed"]:
-                print(f"  Task {task['task_number']}: Excluded (Completed)")
-            else:
-                print(f"  Task {task['task_number']}: Included")
+            print(f"  Task {task['task_number']}: {'Included' if not task['completed'] else 'Excluded (Completed)'}")
 
         for _, task in eligible_tasks.iterrows():
             task_id = (job_number, task["task_number"])
-            # Ensure setup_time and time_each are numeric and handle None/NaN
             setup_time = float(task["setup_time"]) if pd.notna(task["setup_time"]) else 0
             time_each = float(task["time_each"]) if pd.notna(task["time_each"]) else 0
             quantity_val = float(quantity) if pd.notna(quantity) else 1
 
-            # Calculate duration: setup_time + (time_each * quantity)
             duration = setup_time + (time_each * quantity_val)
-
-            # Debug: Print the values used in the calculation
-            print(f"    Calculating duration for Task {task_id}:")
-            print(f"      setup_time = {setup_time}")
-            print(f"      time_each = {time_each}")
-            print(f"      quantity = {quantity_val}")
-            print(f"      duration = {setup_time} + ({time_each} * {quantity_val}) = {duration}")
-
-            # Ensure duration is a positive integer
-            duration = int(max(1, duration))  # Ensure at least 1 minute to avoid zero duration
+            print(f"    Task {task_id}: setup_time={setup_time}, time_each={time_each}, quantity={quantity_val}, duration={duration}")
+            duration = int(max(1, duration))
 
             resources = task["resources"]
             predecessors = task["predecessors"]
@@ -196,35 +204,58 @@ def schedule_jobs(start_date, output_buffer):
                 "task_id": task_id,
                 "duration": duration,
                 "resources": resources,
-                "predecessors": predecessors
+                "predecessors": predecessors,
+                "original_resources": resources  # Store for filtering
             })
             job_tasks[job_number].append(index)
             index += 1
 
-    # Debug: Validate task data
-    print("\nTask Data Validation:")
+    print("\nTask Data:")
     for i, task in enumerate(all_tasks):
-        print(f"Task {task['task_id']}: Duration={task['duration']}, Resources={task['resources']}, Predecessors={task['predecessors']}")
+        print(f"Task {task['task_id']}: Duration={task['duration']}, Resources={task['resources']}")
         if task["duration"] <= 0:
-            print(f"Warning: Task {task['task_id']} has duration <= 0. This may cause issues.")
+            print(f"Warning: Task {task['task_id']} has duration <= 0.")
 
-    # Debug: Check for cycles in predecessor graph
     visited = [False] * len(all_tasks)
     stack = [False] * len(all_tasks)
     for task_id in task_to_index:
         if not visited[task_to_index[task_id]]:
             if detect_cycle(task_id, visited, stack, task_to_index, all_tasks):
-                print("Error: Cycle detected in predecessor relationships. Scheduling cannot proceed.")
+                print("Error: Cycle detected. Scheduling cannot proceed.")
                 return None
 
-    # Step 3: Set up the OR-Tools model
+    # Filter tasks by resource availability considering holidays
+    filtered_tasks = []
+    task_resource_availability = {}
+    for i, task in enumerate(all_tasks):
+        available_resources = []
+        for res in task["resources"]:
+            if res in resource_mapping:
+                res_id = resource_mapping[res]
+                if res_id != -1:
+                    available_resources.append(res)
+            elif res in resource_group_mapping:
+                group_resources = resource_group_mapping[res]
+                available_resources.extend([id_to_resource[res_id] for res_id in group_resources])
+        task_resource_availability[i] = available_resources
+        if available_resources:
+            filtered_tasks.append(task)
+        else:
+            print(f"Task {task['task_id']} skipped: No available resources.")
+
+    all_tasks = filtered_tasks
+    task_to_index = {(task["task_id"][0], task["task_id"][1]): i for i, task in enumerate(all_tasks)}
+    job_tasks = {}
+    for job_number in eligible_jobs["job_number"]:
+        job_tasks[job_number] = [
+            i for i, task in enumerate(all_tasks) if task["task_id"][0] == job_number
+        ]
+
+    # OR-Tools model
     model = cp_model.CpModel()
-
-    # Define the horizon
     horizon = sum(task["duration"] for task in all_tasks) * 2
-    print(f"\nHorizon set to {horizon} minutes (approximately {horizon / (60 * 24):.2f} days)")
+    print(f"\nHorizon: {horizon} minutes")
 
-    # Variables: Start and end times for each task
     task_starts = {}
     task_ends = {}
     for i, task in enumerate(all_tasks):
@@ -232,7 +263,6 @@ def schedule_jobs(start_date, output_buffer):
         task_ends[i] = model.NewIntVar(0, horizon, f"end_{i}")
         model.Add(task_ends[i] == task_starts[i] + task["duration"])
 
-    # Predecessor constraints
     for i, task in enumerate(all_tasks):
         if not task["predecessors"]:
             continue
@@ -244,111 +274,84 @@ def schedule_jobs(start_date, output_buffer):
                 pred_index = task_to_index[pred_task_id]
                 model.Add(task_starts[i] >= task_ends[pred_index])
             else:
-                print(f"Warning: Predecessor {pred_task_id} for task {task['task_id']} not found.")
+                print(f"Warning: Predecessor {pred_task_id} not found.")
 
-    # Resource constraints
     resource_intervals = {res_id: [] for res_id in resources_df["id"]}
     task_resource_assignments = {}
 
     for i, task in enumerate(all_tasks):
-        task_resources = task["resources"]
+        task_resources = task_resource_availability[i]
         if not task_resources:
-            print(f"Warning: Task {task['task_id']} has no resources specified.")
             continue
 
+        start_datetime = elapsed_minutes_to_datetime(task_starts[i], start_date, working_hours, holidays)
+        end_datetime = elapsed_minutes_to_datetime(task_starts[i] + task["duration"], start_date, working_hours, holidays)
+        task_date = start_datetime.date()
+
+        # Check resource availability for the task's date
+        holiday = holidays.get(task_date)
+        available_resources = []
         for res in task_resources:
             if res in resource_mapping:
                 res_id = resource_mapping[res]
+                if holiday and holiday['resources'] and res_id in holiday['resources']:
+                    continue  # Resource unavailable due to holiday
                 if res_id != -1:
-                    interval = model.NewIntervalVar(
-                        task_starts[i], task["duration"], task_ends[i], f"interval_{i}_res_{res_id}"
-                    )
-                    resource_intervals[res_id].append(interval)
-                    if i not in task_resource_assignments:
-                        task_resource_assignments[i] = []
-                    task_resource_assignments[i].append(res_id)
+                    available_resources.append(res_id)
             elif res in resource_group_mapping:
                 group_resources = resource_group_mapping[res]
-                if not group_resources:
-                    print(f"Error: Resource group {res} has no resources for task {task['task_id']}.")
-                    continue
-
-                selected_resource = model.NewIntVarFromDomain(
-                    cp_model.Domain.FromValues(group_resources),
-                    f"selected_resource_{i}_{res}"
-                )
-
-                intervals = []
-                bool_vars = []
                 for res_id in group_resources:
-                    is_active = model.NewBoolVar(f"use_res_{res_id}_for_task_{i}")
-                    interval = model.NewOptionalIntervalVar(
-                        task_starts[i],
-                        task["duration"],
-                        task_ends[i],
-                        is_active,
-                        f"interval_{i}_res_{res_id}"
-                    )
-                    intervals.append((res_id, interval, is_active))
-                    bool_vars.append(is_active)
+                    if holiday and holiday['resources'] and res_id in holiday['resources']:
+                        continue
+                    available_resources.append(res_id)
 
-                model.AddExactlyOne(bool_vars)
+        if not available_resources:
+            print(f"Task {task['task_id']} cannot be scheduled: No resources available on {task_date}.")
+            continue
 
-                for res_id, interval, is_active in intervals:
-                    resource_intervals[res_id].append(interval)
+        # Assign resources
+        for res_id in available_resources:
+            interval = model.NewIntervalVar(
+                task_starts[i], task["duration"], task_ends[i], f"interval_{i}_res_{res_id}"
+            )
+            resource_intervals[res_id].append(interval)
+            if i not in task_resource_assignments:
+                task_resource_assignments[i] = []
+            task_resource_assignments[i].append(res_id)
 
-                for res_id, _, is_active in intervals:
-                    model.Add(selected_resource == res_id).OnlyEnforceIf(is_active)
-                    model.Add(selected_resource != res_id).OnlyEnforceIf(is_active.Not())
-
-                if i not in task_resource_assignments:
-                    task_resource_assignments[i] = []
-                task_resource_assignments[i].append(selected_resource)
-
-    # Enforce no overlap for each resource
     for res_id, intervals in resource_intervals.items():
         if intervals:
-            print(f"Resource {res_id} has {len(intervals)} tasks assigned.")
+            print(f"Resource {res_id}: {len(intervals)} tasks.")
             model.AddNoOverlap(intervals)
-        else:
-            print(f"Resource {res_id} has no tasks assigned.")
 
-    # Objective: Minimize makespan
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [task_ends[i] for i in range(len(all_tasks))])
     model.Minimize(makespan)
 
-    # Step 4: Solve the model
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 60.0
     status = solver.Solve(model)
 
-    # Step 5: Output the schedule
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print("\nSchedule found!")
-        print(f"Makespan: {solver.Value(makespan)} elapsed minutes")
+        print(f"Makespan: {solver.Value(makespan)} minutes")
         schedule = []
         id_to_resource = {v: k for k, v in resource_mapping.items()}
         resource_usage = {res_id: [] for res_id in resources_df["id"]}
         for i, task in enumerate(all_tasks):
             start = solver.Value(task_starts[i])
             end = solver.Value(task_ends[i])
-            start_datetime = elapsed_minutes_to_datetime(start, start_date, working_hours)
-            end_datetime = elapsed_minutes_to_datetime(end, start_date, working_hours)
+            start_datetime = elapsed_minutes_to_datetime(start, start_date, working_hours, holidays)
+            end_datetime = elapsed_minutes_to_datetime(end, start_date, working_hours, holidays)
 
-            assigned_resources = []
-            for res in task_resource_assignments.get(i, []):
-                if isinstance(res, int):
-                    assigned_resources.append(res)
-                else:
-                    assigned_resources.append(solver.Value(res))
+            assigned_resources = task_resource_assignments.get(i, [])
             resource_names = [id_to_resource.get(res_id, str(res_id)) for res_id in assigned_resources]
             resources_used = ",".join(resource_names)
 
             for res_id in assigned_resources:
                 resource_usage[res_id].append((task["task_id"], start, end))
 
-            print(f"Task {task['task_id']}: Start = {start_datetime}, End = {end_datetime}, Resources = {resource_names}")
+            print(f"Task {task['task_id']}: Start={start_datetime}, End={end_datetime}, Resources={resource_names}")
             schedule.append({
                 "task_number": task["task_id"][1],
                 "start_time": start_datetime,
@@ -360,16 +363,11 @@ def schedule_jobs(start_date, output_buffer):
             if not usage:
                 continue
             usage.sort(key=lambda x: x[1])
-            print(f"\nResource {id_to_resource.get(res_id, res_id)} usage (in elapsed minutes):")
+            print(f"\nResource {id_to_resource.get(res_id, res_id)} usage:")
             for task_id, start, end in usage:
-                start_dt = elapsed_minutes_to_datetime(start, start_date, working_hours)
-                end_dt = elapsed_minutes_to_datetime(end, start_date, working_hours)
-                print(f"  Task {task_id}: {start} to {end} (Real time: {start_dt} to {end_dt})")
-            for j in range(len(usage) - 1):
-                task1, start1, end1 = usage[j]
-                task2, start2, end2 = usage[j + 1]
-                if end1 > start2:
-                    print(f"  Overlap detected: Task {task1} (ends {end1}) overlaps with Task {task2} (starts {start2})")
+                start_dt = elapsed_minutes_to_datetime(start, start_date, working_hours, holidays)
+                end_dt = elapsed_minutes_to_datetime(end, start_date, working_hours, holidays)
+                print(f"  Task {task_id}: {start_dt} to {end_dt}")
 
         try:
             with engine.connect() as conn:
@@ -386,9 +384,9 @@ def schedule_jobs(start_date, output_buffer):
                         "resources_used": entry["resources_used"]
                     })
                 conn.commit()
-                print("Schedule successfully saved to the database!")
+                print("Schedule saved to database!")
         except Exception as e:
-            print(f"Error saving schedule to database: {e}")
+            print(f"Error saving schedule: {e}")
             return None
 
         return schedule
@@ -396,34 +394,23 @@ def schedule_jobs(start_date, output_buffer):
         print("No solution found.")
         return None
 
-# GUI class for scheduling
+# GUI class (unchanged)
 class SchedulerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Timely Scheduler")
         self.root.geometry("1000x700")
-
-        # Label and date picker for starting date
         self.label = tk.Label(root, text="Select Schedule Start Date:")
         self.label.pack(pady=10)
-
         self.date_entry = DateEntry(root, width=12, background='darkblue',
                                    foreground='white', borderwidth=2, date_pattern='y-mm-dd')
         self.date_entry.pack(pady=10)
-
-        # Schedule button
         self.schedule_button = tk.Button(root, text="Run Scheduler", command=self.run_scheduler)
         self.schedule_button.pack(pady=10)
-
-        # Status label
         self.status_label = tk.Label(root, text="")
         self.status_label.pack(pady=10)
-
-        # Error label (for displaying errors above the console)
         self.error_label = tk.Label(root, text="", fg="red")
         self.error_label.pack(pady=5)
-
-        # Frame for the Matrix console
         self.console_frame = tk.Frame(root, bg="black")
         self.console_canvas = tk.Canvas(self.console_frame, bg="black", highlightthickness=0)
         self.console_text_frame = tk.Frame(self.console_canvas, bg="black")
@@ -442,51 +429,33 @@ class SchedulerGUI:
         self.console_text_area.pack(fill=tk.BOTH, expand=True)
         self.console_canvas.pack(fill=tk.BOTH, expand=True)
         self.console_text_area.config(state=tk.DISABLED)
-
-        # Matrix effect variables
         self.columns = []
         self.chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()_+-=[]{}|;:,.<>?"
         self.drops = []
         self.matrix_active = False
-
-        # Frame for the table and web interface button
         self.table_frame = tk.Frame(root)
         self.table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Web interface button (initially hidden)
         self.web_button = tk.Button(self.table_frame, text="View on Web Interface",
                                    command=self.open_web_interface)
-        # Table for displaying the schedule (initially empty)
         self.tree = None
-
-        # Output buffer for capturing terminal output
         self.output_buffer = StringIO()
 
     def init_matrix_effect(self):
-        # Calculate the number of columns based on window width
         width = self.console_canvas.winfo_screenwidth()
-        self.column_width = 20  # Width of each column in pixels
+        self.column_width = 20
         num_columns = width // self.column_width
-
-        # Initialize drops for each column
         self.drops = [random.randint(-50, 0) for _ in range(num_columns)]
         self.columns = [[] for _ in range(num_columns)]
 
     def animate_matrix(self):
         if not self.matrix_active:
             return
-
-        self.console_canvas.delete("matrix")  # Clear previous characters
-
+        self.console_canvas.delete("matrix")
         height = self.console_canvas.winfo_height() // self.column_width
         for i in range(len(self.drops)):
-            # Get the current drop position
             y = self.drops[i]
-
-            # If the drop is still on screen, add a new character
             if y >= 0 and y < height:
                 char = random.choice(self.chars)
-                # Fade effect: brighter at the top, dimmer as it falls
                 brightness = max(0, 255 - (y * 10))
                 color = f"#{brightness:02x}FF{brightness:02x}"
                 self.console_canvas.create_text(
@@ -497,28 +466,20 @@ class SchedulerGUI:
                     font=("Courier", 14),
                     tags="matrix"
                 )
-
-            # Move the drop down
             self.drops[i] += 1
-
-            # Reset the drop if it reaches the bottom
             if self.drops[i] * self.column_width > self.console_canvas.winfo_height() and random.random() > 0.975:
                 self.drops[i] = random.randint(-50, 0)
-
-        # Schedule the next frame
         self.root.after(50, self.animate_matrix)
 
     def update_console(self):
-        # Update the console text area with the latest output
         self.console_text_area.config(state=tk.NORMAL)
         self.console_text_area.delete(1.0, tk.END)
         self.console_text_area.insert(tk.END, self.output_buffer.getvalue())
         self.console_text_area.config(state=tk.DISABLED)
-        self.console_text_area.yview(tk.END)  # Auto-scroll to the bottom
-        self.root.after(100, self.update_console)  # Schedule the next update
+        self.console_text_area.yview(tk.END)
+        self.root.after(100, self.update_console)
 
     def show_console(self):
-        # Show the Matrix console
         self.console_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.init_matrix_effect()
         self.matrix_active = True
@@ -526,7 +487,6 @@ class SchedulerGUI:
         self.update_console()
 
     def hide_console(self):
-        # Hide the Matrix console
         self.matrix_active = False
         self.console_frame.pack_forget()
 
@@ -537,26 +497,21 @@ class SchedulerGUI:
     def display_schedule(self, schedule):
         if self.tree:
             self.tree.destroy()
-
         self.web_button.pack(pady=5)
-
         self.tree = ttk.Treeview(self.table_frame, columns=("Task Number", "Start Time", "End Time", "Resources Used"),
                                 show="headings")
         self.tree.heading("Task Number", text="Task Number")
         self.tree.heading("Start Time", text="Start Time")
         self.tree.heading("End Time", text="End Time")
         self.tree.heading("Resources Used", text="Resources Used")
-
         self.tree.column("Task Number", width=150)
         self.tree.column("Start Time", width=200)
         self.tree.column("End Time", width=200)
         self.tree.column("Resources Used", width=200)
-
         scrollbar = ttk.Scrollbar(self.table_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
         for entry in schedule:
             self.tree.insert("", tk.END, values=(
                 entry["task_number"],
@@ -570,20 +525,15 @@ class SchedulerGUI:
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
             self.status_label.config(text="Scheduling in progress...", fg="blue")
-            self.error_label.config(text="")  # Clear any previous error
-            if self.tree:  # Clear the previous schedule table if it exists
+            self.error_label.config(text="")
+            if self.tree:
                 self.tree.destroy()
-            self.web_button.pack_forget()  # Hide the web button
-            self.show_console()  # Show the Matrix console
+            self.web_button.pack_forget()
+            self.show_console()
             self.root.update()
-
-            # Clear the output buffer
             self.output_buffer.seek(0)
             self.output_buffer.truncate(0)
-
-            # Run the scheduling in a separate thread to keep the GUI responsive
             self.root.after(100, lambda: self.schedule_in_thread(start_date))
-
         except ValueError:
             self.status_label.config(text="Invalid date format. Use YYYY-MM-DD.", fg="red")
             self.hide_console()
@@ -593,19 +543,16 @@ class SchedulerGUI:
         self.root.after(0, lambda: self.handle_schedule_result(schedule))
 
     def handle_schedule_result(self, schedule):
-        sys.stdout = sys.__stdout__  # Restore stdout
-
+        sys.stdout = sys.__stdout__
         if schedule:
             self.status_label.config(text="Scheduling complete! Saved to database.", fg="green")
             self.display_schedule(schedule)
-            self.hide_console()  # Hide the console on success
-            self.error_label.config(text="")  # Clear any error message
+            self.hide_console()
+            self.error_label.config(text="")
         else:
             self.status_label.config(text="Scheduling failed.", fg="red")
-            self.error_label.config(text="Scheduling failed. See console output below for details.", fg="red")
-            # Keep the console visible to show the error details
+            self.error_label.config(text="Scheduling failed. See console output below.", fg="red")
 
-# Main function to launch the GUI
 if __name__ == "__main__":
     root = tk.Tk()
     app = SchedulerGUI(root)

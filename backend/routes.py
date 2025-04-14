@@ -1,6 +1,6 @@
 from app import app, db, logger
 from datetime import datetime
-from models import Schedule, Calendar, Resource, ResourceGroup, ResourceGroupAssociation, Template, TemplateMaterial, TemplateTask, Job, Task, Material
+from models import Schedule, Calendar, Resource, ResourceGroup, ResourceGroupAssociation, Template, TemplateMaterial, TemplateTask, Job, Task, Material, Holiday
 from flask import jsonify, request
 
 @app.route('/api/schedule', methods=['GET'])
@@ -32,6 +32,71 @@ def get_working_hours():
     except Exception as e:
         logger.error(f"Error fetching working hours: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/working_hours_for_date', methods=['GET'])
+def get_working_hours_for_date():
+    try:
+        date_str = request.args.get('date')
+        resource_id = request.args.get('resource_id', type=int)
+        if not date_str:
+            return jsonify({'error': 'Date parameter is required'}), 400
+        
+        target_date = datetime.fromisoformat(date_str).date()
+        logger.info(f"Fetching working hours for date {target_date} and resource {resource_id}")
+        
+        # Check holidays first
+        holiday = Holiday.query.filter_by(date=target_date).first()
+        if holiday:
+            # If resources are specified and resource_id is provided
+            if holiday.resources and resource_id:
+                if resource_id in holiday.resources:
+                    # Resource is unavailable
+                    return jsonify({
+                        'date': target_date.isoformat(),
+                        'start_time': None,
+                        'end_time': None,
+                        'is_available': False
+                    })
+                else:
+                    # Resource is not listed, check regular hours
+                    pass
+            elif holiday.resources:
+                # Holiday applies to specific resources, but no resource_id provided
+                return jsonify({
+                    'date': target_date.isoformat(),
+                    'start_time': holiday.start_time.strftime('%H:%M') if holiday.start_time else None,
+                    'end_time': holiday.end_time.strftime('%H:%M') if holiday.end_time else None,
+                    'is_available': bool(holiday.start_time and holiday.end_time)
+                })
+            else:
+                # Holiday applies to all resources
+                return jsonify({
+                    'date': target_date.isoformat(),
+                    'start_time': holiday.start_time.strftime('%H:%M') if holiday.start_time else None,
+                    'end_time': holiday.end_time.strftime('%H:%M') if holiday.end_time else None,
+                    'is_available': bool(holiday.start_time and holiday.end_time)
+                })
+        
+        # No holiday, check regular calendar
+        weekday = target_date.isoweekday()  # 1=Monday, 7=Sunday
+        calendar_entry = Calendar.query.filter_by(weekday=weekday).first()
+        if not calendar_entry:
+            return jsonify({
+                'date': target_date.isoformat(),
+                'start_time': None,
+                'end_time': None,
+                'is_available': False
+            })
+        
+        return jsonify({
+            'date': target_date.isoformat(),
+            'start_time': calendar_entry.start_time.strftime('%H:%M'),
+            'end_time': calendar_entry.end_time.strftime('%H:%M'),
+            'is_available': True
+        })
+    except Exception as e:
+        logger.error(f"Error fetching working hours for date: {str(e)}")
+        return jsonify({'error': str(e)}), 500   
 
 # Calendar Endpoints
 @app.route('/api/calendar', methods=['GET'], endpoint='get_calendar')
@@ -742,3 +807,66 @@ def manage_material(id):
         except Exception as e:
             logger.error(f"Error deleting material: {str(e)}")
             return jsonify({'error': str(e)}), 500
+
+# Holiday Endpoints
+@app.route('/api/holidays', methods=['GET'], endpoint='get_holidays')
+def get_holidays():
+    try:
+        logger.info("Fetching holidays data")
+        holidays = Holiday.query.all()
+        return jsonify([{
+            'id': h.id,
+            'date': h.date.isoformat(),
+            'start_time': h.start_time.strftime('%H:%M') if h.start_time else None,
+            'end_time': h.end_time.strftime('%H:%M') if h.end_time else None,
+            'resources': h.resources if h.resources else []
+        } for h in holidays])
+    except Exception as e:
+        logger.error(f"Error fetching holidays: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/holidays', methods=['POST'], endpoint='add_holiday')
+def add_holiday():
+    try:
+        data = request.get_json()
+        new_holiday = Holiday(
+            date=datetime.fromisoformat(data['date']).date(),
+            start_time=datetime.strptime(data['start_time'], '%H:%M').time() if data.get('start_time') else None,
+            end_time=datetime.strptime(data['end_time'], '%H:%M').time() if data.get('end_time') else None,
+            resources=data.get('resources', [])
+        )
+        db.session.add(new_holiday)
+        db.session.commit()
+        logger.info("Added new holiday")
+        return jsonify({'message': 'Holiday added successfully', 'id': new_holiday.id}), 201
+    except Exception as e:
+        logger.error(f"Error adding holiday: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/holidays/<int:id>', methods=['PUT'], endpoint='update_holiday')
+def update_holiday(id):
+    try:
+        data = request.get_json()
+        holiday = Holiday.query.get_or_404(id)
+        holiday.date = datetime.fromisoformat(data['date']).date()
+        holiday.start_time = datetime.strptime(data['start_time'], '%H:%M').time() if data.get('start_time') else None
+        holiday.end_time = datetime.strptime(data['end_time'], '%H:%M').time() if data.get('end_time') else None
+        holiday.resources = data.get('resources', [])
+        db.session.commit()
+        logger.info(f"Updated holiday with id {id}")
+        return jsonify({'message': 'Holiday updated successfully'})
+    except Exception as e:
+        logger.error(f"Error updating holiday: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/holidays/<int:id>', methods=['DELETE'], endpoint='delete_holiday')
+def delete_holiday(id):
+    try:
+        holiday = Holiday.query.get_or_404(id)
+        db.session.delete(holiday)
+        db.session.commit()
+        logger.info(f"Deleted holiday with id {id}")
+        return jsonify({'message': 'Holiday deleted successfully'})
+    except Exception as e:
+        logger.error(f"Error deleting holiday: {str(e)}")
+        return jsonify({'error': str(e)}), 500
