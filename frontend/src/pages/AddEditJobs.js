@@ -124,10 +124,10 @@ const AddEditJobs = () => {
 
   const checkAndUpdateJobCompletion = async (jobId, tasks) => {
     if (!jobId || !tasks || tasks.length === 0) return;
-  
+
     // Check if all tasks are completed
     const allTasksCompleted = tasks.every(task => task.completed);
-  
+
     if (allTasksCompleted && !jobData.completed) {
       try {
         // Update the job's completed status to true
@@ -622,7 +622,7 @@ const AddEditJobs = () => {
       setError('Please enter a job number.');
       return;
     }
-  
+
     setIsCreatingJob(true);
     try {
       const jobsResponse = await axios.get('http://localhost:5000/api/job');
@@ -632,7 +632,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-  
+
       const templateResponse = await axios.get('http://localhost:5000/api/template');
       const template = templateResponse.data.find((t) => t.id === parseInt(selectedTemplateId));
       if (!template) {
@@ -640,7 +640,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-  
+
       const newJobData = {
         job_number: templateJobNumber,
         description: template.description,
@@ -654,14 +654,14 @@ const AddEditJobs = () => {
       };
       const createJobResponse = await axios.post('http://localhost:5000/api/job', newJobData);
       const newJobId = createJobResponse.data.id;
-  
+
       const templateTasksResponse = await axios.get(
         `http://localhost:5000/api/template_task/${selectedTemplateId}`
       );
       const templateMaterialsResponse = await axios.get(
         `http://localhost:5000/api/template_material/${selectedTemplateId}`
       );
-  
+
       const newTasks = [];
       for (const [index, t] of templateTasksResponse.data.entries()) {
         const taskNumber = `${newJobData.job_number}-${index + 1}`;
@@ -671,7 +671,7 @@ const AddEditJobs = () => {
           const newPredecessors = predecessorSequences.map((seq) => `${newJobData.job_number}-${seq}`);
           transformedPredecessors = newPredecessors.join(', ');
         }
-  
+
         const taskData = {
           task_number: taskNumber,
           job_number: newJobData.job_number,
@@ -685,7 +685,7 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/task', taskData);
         newTasks.push({ id: response.data.id, ...taskData });
       }
-  
+
       const newMaterials = [];
       for (const m of templateMaterialsResponse.data) {
         const materialData = {
@@ -697,7 +697,7 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/material', materialData);
         newMaterials.push({ id: response.data.id, ...materialData });
       }
-  
+
       setJobData({
         ...newJobData,
         id: newJobId,
@@ -730,7 +730,7 @@ const AddEditJobs = () => {
       setError('Please enter a job number.');
       return;
     }
-  
+
     setIsCreatingJob(true);
     try {
       const jobsResponse = await axios.get('http://localhost:5000/api/job');
@@ -740,7 +740,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-  
+
       const jobToCopyResponse = await axios.get(`http://localhost:5000/api/job/${selectedCopyJobId}`);
       const jobToCopy = jobToCopyResponse.data;
       if (!jobToCopy) {
@@ -748,7 +748,7 @@ const AddEditJobs = () => {
         setIsCreatingJob(false);
         return;
       }
-  
+
       const newJobData = {
         job_number: copyJobNumber,
         description: jobToCopy.description,
@@ -762,14 +762,14 @@ const AddEditJobs = () => {
       };
       const createJobResponse = await axios.post('http://localhost:5000/api/job', newJobData);
       const newJobId = createJobResponse.data.id;
-  
+
       const tasksToCopyResponse = await axios.get(
         `http://localhost:5000/api/task/by_job/${jobToCopy.job_number}`
       );
       const materialsToCopyResponse = await axios.get(
         `http://localhost:5000/api/material/by_job/${jobToCopy.job_number}`
       );
-  
+
       const newTasks = [];
       for (const t of tasksToCopyResponse.data) {
         const taskSequence = t.task_number.split('-')[1];
@@ -782,9 +782,9 @@ const AddEditJobs = () => {
           time_each: t.time_each,
           predecessors: t.predecessors
             ? t.predecessors.replace(/\d+-\d+/g, (match) => {
-                const sequence = match.split('-')[1];
-                return `${newJobData.job_number}-${sequence}`;
-              })
+              const sequence = match.split('-')[1];
+              return `${newJobData.job_number}-${sequence}`;
+            })
             : '',
           resources: t.resources,
           completed: false, // Set to false for all tasks in the new job
@@ -792,7 +792,7 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/task', taskData);
         newTasks.push({ id: response.data.id, ...taskData });
       }
-  
+
       const newMaterials = [];
       for (const m of materialsToCopyResponse.data) {
         const materialData = {
@@ -804,7 +804,7 @@ const AddEditJobs = () => {
         const response = await axios.post('http://localhost:5000/api/material', materialData);
         newMaterials.push({ id: response.data.id, ...materialData });
       }
-  
+
       setJobData({
         ...newJobData,
         id: newJobId,
