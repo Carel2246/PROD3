@@ -41,12 +41,18 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
-      # Copy frontend build into backend for serving
-      - name: Move React build into backend
+      # Prepare deployment package
+      - name: Prepare deployment package
         run: |
-          rm -rf backend/frontend
-          mkdir -p backend/frontend
-          cp -r frontend/build/* backend/frontend/
+          # Create a deployment directory
+          mkdir -p deploy
+          # Copy backend files
+          cp -r backend/* deploy/
+          # Create frontend directory and copy build files
+          mkdir -p deploy/frontend
+          cp -r frontend/build/* deploy/frontend/
+          # Copy requirements.txt
+          cp backend/requirements.txt deploy/
 
       # Deploy using Azure Web App Deploy Action
       - name: Deploy to Azure Web App
@@ -54,4 +60,4 @@ jobs:
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: backend
+          package: deploy
