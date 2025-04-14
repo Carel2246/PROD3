@@ -34,9 +34,10 @@ def serve_react(path):
 
     if path.startswith('static/'):
         subpath = path[len('static/'):]
-        logger.info(f"[serve_react] Trying to send static file: {subpath}")
+        logger.info(f"[serve_react] Serving static file: {subpath}")
         return send_from_directory(static_dir, subpath)
 
+    # Serve favicon, manifest, other top-level assets
     full_path = os.path.join(build_dir, path)
     if os.path.exists(full_path) and os.path.isfile(full_path):
         logger.info(f"[serve_react] Serving file directly: {path}")
