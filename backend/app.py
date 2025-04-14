@@ -26,19 +26,21 @@ db = SQLAlchemy(app)
 
 # Build path
 build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'frontend'))
-static_dir = os.path.join(build_dir, 'static')
 
 # ✅ Handle /static/* directly from build folder
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     logger.info(f"[serve_static] Serving static file: {filename}")
+    static_dir = os.path.join(build_dir, 'static')
     return send_from_directory(static_dir, filename)
 
 # Other static files (manifest, logo, etc)
 @app.route('/<path:path>')
 def serve_react_files(path):
-    full_path = os.path.join(build_dir, path)
     logger.info(f"[serve_react_files] Requested path: {path}")
+    if path.startswith('static/'):
+        return serve_static(path.replace('static/', '', 1))
+    full_path = os.path.join(build_dir, path)
     if os.path.exists(full_path):
         logger.info(f"[serve_react_files] Found file, serving: {full_path}")
         return send_from_directory(build_dir, path)
