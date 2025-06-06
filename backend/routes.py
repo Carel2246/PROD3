@@ -96,7 +96,7 @@ def get_working_hours_for_date():
         })
     except Exception as e:
         logger.error(f"Error fetching working hours for date: {str(e)}")
-        return jsonify({'error': str(e)}), 500   
+        return jsonify({'error': str(e)}), 500  
 
 # Calendar Endpoints
 @app.route('/api/calendar', methods=['GET'], endpoint='get_calendar')
@@ -869,4 +869,104 @@ def delete_holiday(id):
         return jsonify({'message': 'Holiday deleted successfully'})
     except Exception as e:
         logger.error(f"Error deleting holiday: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/scheduled_jobs', methods=['GET'])
+def get_scheduled_jobs():
+    try:
+        logger.debug('Fetching scheduled uncompleted jobs...')
+        jobs = Job.query.filter_by(completed=False, blocked=False).all()
+        logger.debug(f'Found {len(jobs)} jobs')
+        result = []
+        for job in jobs:
+            tasks = Task.query.filter_by(job_number=job.job_number).all()
+            task_numbers = [task.task_number for task in tasks]
+            schedule = Schedule.query.filter(Schedule.task_number.in_(task_numbers)).all()
+            completion_date = max((s.end_time for s in schedule), default=None) if schedule else None
+            days_late = 0
+            if completion_date and completion_date.date() > job.promised_date.date():
+                days_late = (completion_date.date() - job.promised_date.date()).days
+            result.append({
+                'job_number': job.job_number,
+                'description': job.description,
+                'quantity': job.quantity,
+                'job_value': float(job.quantity * job.price_each),
+                'completion_date': completion_date.isoformat() if completion_date else '',
+                'days_late': days_late
+            })
+        logger.debug(f'Returning {len(result)} scheduled jobs')
+        return jsonify(sorted(result, key=lambda x: x['job_number']))
+    except Exception as e:
+        logger.error(f"Error fetching scheduled jobs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/schedule_summary', methods=['GET'])
+def get_schedule_summary():
+    try:
+        logger.debug('Fetching schedule summary')
+        schedule = Schedule.query.all()
+        if not schedule:
+            logger.info('No schedule entries found')
+            return jsonify({'makespan': 0, 'total_rand_days_late': 0})
+        start_time = min(s.start_time for s in schedule)
+        end_time = max(s.end_time for s in schedule)
+        makespan_days = (end_time - start_time).total_seconds() / 86400
+        jobs = Job.query.filter_by(completed=False, blocked=False).all()
+        total_rand_days_late = 0
+        for job in jobs:
+            tasks = Task.query.filter_by(job_number=job.job_number).all()
+            task_numbers = [task.task_number for task in tasks]
+            schedule = Schedule.query.filter(Schedule.task_number.in_(task_numbers)).all()
+            if schedule:
+                completion_date = max(s.end_time for s in schedule)
+                days_late = max(0, (completion_date.date() - job.promised_date.date()).days)
+                total_rand_days_late += days_late * job.quantity * job.price_each
+        logger.debug(f'Makespan: {makespan_days}, Rand-Days Late: {total_rand_days_late}')
+        return jsonify({
+            'makespan': round(makespan_days, 2),
+            'total_rand_days_late': round(total_rand_days_late, 2)
+        })
+    except Exception as e:
+        logger.error(f"Error fetching schedule summary: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/scheduled_tasks', methods=['GET'])
+def get_scheduled_tasks():
+    try:
+        logger.debug('Fetching scheduled uncompleted tasks...')
+        tasks = db.session.query(Task, Job, Schedule).join(Job, Task.job_number == Job.job_number).join(Schedule, Task.task_number == Schedule.task_number).filter(Job.completed == False, Job.blocked == False, Task.completed == False).all()
+        logger.debug(f'Found {len(tasks)} tasks')
+        result = [{
+            'id': task.Task.id,
+            'task_number': task.Task.task_number,
+            'job_number': task.Job.job_number,
+            'customer': task.Job.customer,
+            'job_description': task.Job.description,
+            'task_description': task.Task.description,
+            'completion_date': task.Schedule.end_time.isoformat(),
+            'completed_at': task.Task.completed_at.isoformat() if task.Task.completed_at else None
+        } for task in tasks]
+        logger.debug(f'Returning {len(result)} scheduled tasks')
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f'Error fetching scheduled tasks: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/task/complete_task', methods=['POST'])
+def complete_task_task():
+    try:
+        data = request.get_json()
+        task_number = data.get('task_number')
+        if not task_number:
+            return jsonify({'error': 'Task number is required'}), 400
+        task = Task.query.filter_by(task_number=task_number, completed=False).first()
+        if not task:
+            return jsonify({'error': 'Task not found or already completed'}), 404
+        task.completed = True
+        task.completed_at = datetime.now()
+        db.session.commit()
+        logger.info(f'Completed task: {task_number}')
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error completing task: {str(e)}")
         return jsonify({'error': str(e)}), 500

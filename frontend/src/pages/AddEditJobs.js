@@ -1462,13 +1462,20 @@ const AddEditJobs = () => {
                   onChange={(e) => setSelectedCopyJobId(e.target.value)}
                 >
                   <option value="">-- Select a job --</option>
-                  {allJobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {`${job.job_number} - ${job.description} - ${job.customer}`}
-                    </option>
-                  ))}
+                  {[...allJobs]
+                    .sort((a, b) =>
+                      b.job_number.localeCompare(a.job_number, undefined, {
+                        numeric: true,
+                        sensitivity: 'base',
+                      })
+                    )
+                    .map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {`${job.job_number} - ${job.description} - ${job.customer}`}
+                      </option>
+                    ))}
                 </Form.Control>
-              </Form.Group>
+                </Form.Group>
               <Form.Group controlId="copy_job_number">
                 <Form.Label>New Job Number</Form.Label>
                 <Form.Control

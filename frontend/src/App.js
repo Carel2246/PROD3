@@ -16,6 +16,7 @@ import AddEditHolidays from './pages/AddEditHolidays';
 import AddEditResources from './pages/AddEditResources';
 import AddEditResourceGroups from './pages/AddEditResourceGroups';
 import AddEditTemplates from './pages/AddEditTemplates';
+import TaskControl from './pages/TaskControl';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
             <Navbar.Collapse id="basic-navbar-nav">
               <Nav className="me-auto">
                 <Nav.Link as={Link} to="/">Home</Nav.Link>
+                <Nav.Link as={Link} to="/task-control">Task Control</Nav.Link>
                 <NavDropdown title="Reports" id="reports-dropdown">
                   <NavDropdown.Item as={Link} to="/reports/production-schedule">Production Schedule</NavDropdown.Item>
                   <NavDropdown.Item as={Link} to="/reports/list-schedule">List Schedule</NavDropdown.Item>
@@ -56,6 +58,7 @@ function App() {
           <Container>
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/task-control" element={<TaskControl />} />
               <Route path="/reports/production-schedule" element={<ProductionSchedule />} />
               <Route path="/reports/list-schedule" element={<ListSchedule />} />
               <Route path="/reports/delivery-schedule" element={<DeliverySchedule />} />

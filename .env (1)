@@ -1,0 +1,5 @@
+DB_HOST=nmiserver.postgres.database.azure.com
+DB_NAME=jobshopdb
+DB_USER=myadmin
+DB_PASS=dXCwCluFm8*PYK
+DB_PORT=5432

@@ -80,20 +80,21 @@ class Job(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     price_each = db.Column(db.Float, nullable=False)
     customer = db.Column(db.String(100), nullable=False)
-    completed = db.Column(db.Boolean, nullable=False, default=False)
+    completed = db.Column(db.Boolean, nullable=False)
     blocked = db.Column(db.Boolean, nullable=False, default=False)
 
 class Task(db.Model):
     __tablename__ = 'task'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    task_number = db.Column(db.String(50), nullable=False)
+    task_number = db.Column(db.String(50), nullable=False, unique=True)
     job_number = db.Column(db.String(50), db.ForeignKey('job.job_number'), nullable=False)
-    description = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.String(255), nullable=True)
     setup_time = db.Column(db.Integer, nullable=False)
     time_each = db.Column(db.Float, nullable=False)
     predecessors = db.Column(db.String(255))
     resources = db.Column(db.String(255))
     completed = db.Column(db.Boolean, nullable=False, default=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
     job = db.relationship('Job', backref='tasks')
 
 class Material(db.Model):

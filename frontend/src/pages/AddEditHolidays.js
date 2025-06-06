@@ -43,12 +43,21 @@ const AddEditHolidays = () => {
     }
   };
 
+  // Format date to YYYY-MM-DD in local time
+  const formatLocalDate = (date) => {
+    if (!date) return null;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const handleAdd = async () => {
     try {
       const holidayData = {
-        date: newHoliday.date.toISOString().split('T')[0],
-        start_time: newHoliday.isFullHoliday ? null : newHoliday.start_time,
-        end_time: newHoliday.isFullHoliday ? null : newHoliday.end_time,
+        date: formatLocalDate(newHoliday.date),
+        start_time: newHoliday.isFullHoliday ? null : newHoliday.start_time || null,
+        end_time: newHoliday.isFullHoliday ? null : newHoliday.end_time || null,
         resources: newHoliday.isFullHoliday ? [] : newHoliday.resources
       };
       const response = await axios.post('http://localhost:5000/api/holidays', holidayData);
@@ -62,7 +71,7 @@ const AddEditHolidays = () => {
   const handleEdit = (holiday) => {
     setEditingId(holiday.id);
     setNewHoliday({
-      date: new Date(holiday.date),
+      date: holiday.date ? new Date(holiday.date) : null,
       start_time: holiday.start_time || '',
       end_time: holiday.end_time || '',
       resources: holiday.resources || [],
@@ -73,9 +82,9 @@ const AddEditHolidays = () => {
   const handleUpdate = async (id) => {
     try {
       const holidayData = {
-        date: newHoliday.date.toISOString().split('T')[0],
-        start_time: newHoliday.isFullHoliday ? null : newHoliday.start_time,
-        end_time: newHoliday.isFullHoliday ? null : newHoliday.end_time,
+        date: formatLocalDate(newHoliday.date),
+        start_time: newHoliday.isFullHoliday ? null : newHoliday.start_time || null,
+        end_time: newHoliday.isFullHoliday ? null : newHoliday.end_time || null,
         resources: newHoliday.isFullHoliday ? [] : newHoliday.resources
       };
       await axios.put(`http://localhost:5000/api/holidays/${id}`, holidayData);
@@ -211,7 +220,7 @@ const AddEditHolidays = () => {
               <td>{new Date(holiday.date).toLocaleDateString('en-US', { weekday: 'long' })}</td>
               <td>{holiday.start_time || 'N/A'}</td>
               <td>{holiday.end_time || 'N/A'}</td>
-              <td>{holiday.resources.length > 0 ? holiday.resources.map(id => resources.find(r => r.id === id)?.name).join(', ') : 'All'}</td>
+              <td>{holiday.resources.length > 0 ? holiday.resources.map(id => resources.find(r => r.id === id)?.name || id).join(', ') : 'All'}</td>
               <td>
                 <Button variant="warning" onClick={() => handleEdit(holiday)} className="me-2">
                   Edit

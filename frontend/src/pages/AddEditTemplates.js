@@ -1,6 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Form, Button, Row, Col, Table } from 'react-bootstrap';
+import ReactFlow, { Background, Controls, Handle } from 'reactflow';
+import 'reactflow/dist/style.css';
+import dagre from 'dagre';
+
+// Custom Node Component (shared or included for completeness)
+const CustomNode = ({ data, id }) => {
+  return (
+    <div
+      style={{
+        background: data.completed ? '#28a745' : '#fff',
+        color: data.completed ? '#fff' : '#000',
+        border: '1px solid #222',
+        width: 200,
+        height: 60,
+        borderRadius: 5,
+        padding: 10,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+      }}
+    >
+      <Handle
+        type="target"
+        position="left"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '20%' }}
+        id={`${id}-left-top`}
+      />
+      <Handle
+        type="target"
+        position="left"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '50%' }}
+        id={`${id}-left-middle`}
+      />
+      <Handle
+        type="target"
+        position="left"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '80%' }}
+        id={`${id}-left-bottom`}
+      />
+      <div>{data.label}</div>
+      <Handle
+        type="source"
+        position="right"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '20%' }}
+        id={`${id}-right-top`}
+      />
+      <Handle
+        type="source"
+        position="right"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '50%' }}
+        id={`${id}-right-middle`}
+      />
+      <Handle
+        type="source"
+        position="right"
+        style={{ background: '#FF000000', width: 1, height: 1, top: '80%' }}
+        id={`${id}-right-bottom`}
+      />
+    </div>
+  );
+};
+
+const nodeTypes = { custom: CustomNode };
 
 const AddEditTemplates = () => {
   const [templates, setTemplates] = useState([]);
@@ -15,10 +79,12 @@ const AddEditTemplates = () => {
     predecessors: '',
     resources: ''
   });
+  const [editTask, setEditTask] = useState(null);
   const [materials, setMaterials] = useState([]);
   const [newMaterial, setNewMaterial] = useState({ description: '', quantity: '', unit: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [flowchartElements, setFlowchartElements] = useState({ nodes: [], edges: [] });
 
   // Fetch all templates on component mount
   useEffect(() => {
@@ -52,6 +118,7 @@ const AddEditTemplates = () => {
       setTasks([]);
       setMaterials([]);
       setTemplateData({ id: '', name: '', price_each: '' });
+      setFlowchartElements({ nodes: [], edges: [] });
       return;
     }
     try {
@@ -87,6 +154,122 @@ const AddEditTemplates = () => {
     fetchTemplateDetails(selectedTemplateId);
   }, [selectedTemplateId]);
 
+  // Generate flowchart for tasks
+  useEffect(() => {
+    if (tasks.length === 0) {
+      setFlowchartElements({ nodes: [], edges: [] });
+      return;
+    }
+
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setGraph({ rankdir: 'LR' });
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+    const nodeWidth = 200;
+    const nodeHeight = 60;
+
+    tasks.forEach(task => {
+      dagreGraph.setNode(task.task_number, { width: nodeWidth, height: nodeHeight });
+    });
+
+    tasks.forEach(task => {
+      if (task.predecessors) {
+        const predecessorList = task.predecessors.split(',').map(p => p.trim());
+        predecessorList.forEach(predecessor => {
+          if (tasks.some(t => t.task_number === predecessor)) {
+            dagreGraph.setEdge(predecessor, task.task_number);
+          }
+        });
+      }
+    });
+
+    dagre.layout(dagreGraph);
+
+    const nodes = tasks.map(task => {
+      const nodeWithPosition = dagreGraph.node(task.task_number);
+      return {
+        id: task.task_number,
+        type: 'custom',
+        data: {
+          label: `${task.task_number} - ${task.description}`,
+          completed: false // Templates don't track completion
+        },
+        position: {
+          x: nodeWithPosition.x - nodeWidth / 2,
+          y: nodeWithPosition.y - nodeHeight / 2
+        }
+      };
+    });
+
+    const edges = [];
+    const sourceHandleCounts = new Map();
+    const targetHandleCounts = new Map();
+
+    tasks.forEach(task => {
+      ['right-top', 'right-middle', 'right-bottom'].forEach(handle => {
+        sourceHandleCounts.set(`${task.task_number}-${handle}`, 0);
+      });
+      ['left-top', 'left-middle', 'left-bottom'].forEach(handle => {
+        targetHandleCounts.set(`${task.task_number}-${handle}`, 0);
+      });
+    });
+
+    tasks.forEach(task => {
+      if (task.predecessors) {
+        const predecessorList = task.predecessors.split(',').map(p => p.trim());
+        predecessorList.forEach(predecessor => {
+          if (tasks.some(t => t.task_number === predecessor)) {
+            const sourceHandles = [
+              `${predecessor}-right-top`,
+              `${predecessor}-right-middle`,
+              `${predecessor}-right-bottom`
+            ];
+            const targetHandles = [
+              `${task.task_number}-left-top`,
+              `${task.task_number}-left-middle`,
+              `${task.task_number}-left-bottom`
+            ];
+
+            let minSourceCount = Infinity;
+            let selectedSourceHandle = sourceHandles[0];
+            sourceHandles.forEach(handle => {
+              const count = sourceHandleCounts.get(handle);
+              if (count < minSourceCount) {
+                minSourceCount = count;
+                selectedSourceHandle = handle;
+              }
+            });
+
+            let minTargetCount = Infinity;
+            let selectedTargetHandle = targetHandles[0];
+            targetHandles.forEach(handle => {
+              const count = targetHandleCounts.get(handle);
+              if (count < minTargetCount) {
+                minTargetCount = count;
+                selectedTargetHandle = handle;
+              }
+            });
+
+            sourceHandleCounts.set(selectedSourceHandle, minSourceCount + 1);
+            targetHandleCounts.set(selectedTargetHandle, minTargetCount + 1);
+
+            edges.push({
+              id: `e-${predecessor}-${task.task_number}`,
+              source: predecessor,
+              target: task.task_number,
+              sourceHandle: selectedSourceHandle,
+              targetHandle: selectedTargetHandle,
+              type: 'bezier',
+              style: { stroke: '#000', strokeWidth: 2 }
+            });
+          }
+        });
+      }
+    });
+
+    setFlowchartElements({ nodes, edges });
+  }, [tasks]);
+
   // Format price in ZAR (e.g., "R 1 234,56")
   const formatPrice = (value) => {
     if (!value && value !== 0) return 'R 0,00';
@@ -96,8 +279,40 @@ const AddEditTemplates = () => {
 
   // Handle price input change (remove "R" and format)
   const handlePriceChange = (e) => {
-    const value = e.target.value.replace(/[^0-9,.]/g, ''); // Allow numbers, commas, and dots
+    const value = e.target.value.replace(/[^0-9,.]/g, '');
     setTemplateData({ ...templateData, price_each: value });
+  };
+
+  const handleEditTask = (task) => {
+    setEditTask({ ...task });
+  };
+
+  const handleEditTaskChange = (e) => {
+    const { name, value } = e.target;
+    setEditTask({ ...editTask, [name]: value });
+  };
+
+  const handleSaveTask = async () => {
+    try {
+      await axios.put(`http://localhost:5000/api/template_task/${editTask.id}`, editTask);
+      setTasks(tasks.map(t => (t.id === editTask.id ? editTask : t)));
+      setEditTask(null);
+      setError(null);
+    } catch (error) {
+      console.error('Error updating task:', error);
+      setError('Failed to update task. Please try again.');
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    try {
+      await axios.delete(`http://localhost:5000/api/template_task/${taskId}`);
+      setTasks(tasks.filter(t => t.id !== taskId));
+      setError(null);
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      setError('Failed to delete task. Please try again.');
+    }
   };
 
   const handleAddTemplate = async () => {
@@ -324,27 +539,45 @@ const AddEditTemplates = () => {
           <Table striped bordered hover responsive>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Template ID</th>
                 <th>Task Number</th>
                 <th>Description</th>
                 <th>Setup Time</th>
                 <th>Time Each</th>
                 <th>Predecessors</th>
                 <th>Resources</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {tasks.map(t => (
                 <tr key={t.id}>
-                  <td>{t.id}</td>
-                  <td>{t.template_id}</td>
-                  <td>{t.task_number}</td>
-                  <td>{t.description}</td>
-                  <td>{t.setup_time}</td>
-                  <td>{t.time_each}</td>
-                  <td>{t.predecessors}</td>
-                  <td>{t.resources}</td>
+                  {editTask && editTask.id === t.id ? (
+                    <>
+                      <td><Form.Control type="text" name="task_number" value={editTask.task_number} onChange={handleEditTaskChange} /></td>
+                      <td><Form.Control type="text" name="description" value={editTask.description} onChange={handleEditTaskChange} /></td>
+                      <td><Form.Control type="number" name="setup_time" value={editTask.setup_time} onChange={handleEditTaskChange} /></td>
+                      <td><Form.Control type="number" step="0.01" name="time_each" value={editTask.time_each} onChange={handleEditTaskChange} /></td>
+                      <td><Form.Control type="text" name="predecessors" value={editTask.predecessors} onChange={handleEditTaskChange} /></td>
+                      <td><Form.Control type="text" name="resources" value={editTask.resources} onChange={handleEditTaskChange} /></td>
+                      <td>
+                        <Button variant="success" size="sm" onClick={handleSaveTask} className="me-2">Save</Button>
+                        <Button variant="secondary" size="sm" onClick={() => setEditTask(null)}>Cancel</Button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{t.task_number}</td>
+                      <td>{t.description}</td>
+                      <td>{t.setup_time}</td>
+                      <td>{t.time_each}</td>
+                      <td>{t.predecessors}</td>
+                      <td>{t.resources}</td>
+                      <td>
+                        <Button variant="info" size="sm" onClick={() => handleEditTask(t)} className="me-2">Edit</Button>
+                        <Button variant="danger" size="sm" onClick={() => handleDeleteTask(t.id)}>Delete</Button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -415,6 +648,26 @@ const AddEditTemplates = () => {
               ))}
             </tbody>
           </Table>
+
+          {/* Task Flowchart */}
+          <h3 className="mt-4">Task Flowchart</h3>
+          {flowchartElements.nodes.length > 0 ? (
+            <div style={{ height: '600px', border: '1px solid #ddd', borderRadius: '5px' }}>
+              <ReactFlow
+                nodes={flowchartElements.nodes}
+                edges={flowchartElements.edges}
+                nodeTypes={nodeTypes}
+                fitView
+                style={{ width: '100%', height: '100%' }}
+                defaultEdgeOptions={{ type: 'bezier', style: { stroke: '#000', strokeWidth: 2 } }}
+              >
+                <Background />
+                <Controls />
+              </ReactFlow>
+            </div>
+          ) : (
+            <p>No tasks available to display in the flowchart.</p>
+          )}
         </div>
       )}
     </div>

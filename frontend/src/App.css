@@ -1,38 +1,55 @@
-.App {
-  text-align: center;
+.task-control {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+.task-card {
+  transition: all 0.8s ease-in-out, height 0.8s ease-in-out, margin 0.8s ease-in-out, opacity 0.8s ease-in-out;
+  -webkit-transition: all 0.8s ease-in-out, height 0.8s ease-in-out, margin 0.8s ease-in-out, opacity 0.8s ease-in-out;
+  will-change: transform, height, opacity, margin;
+  overflow: hidden;
+  position: relative;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
+.task-card-exit {
+  animation: shrinkCard 0.8s ease-in-out forwards;
+  -webkit-animation: shrinkCard 0.8s ease-in-out forwards;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  /* background-color: red; */ /* Uncomment for debug */
+}
+
+@keyframes shrinkCard {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.2);
+    opacity: 0;
   }
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+@-webkit-keyframes shrinkCard {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
 }
 
-.App-link {
-  color: #61dafb;
+.task-button {
+  width: 100%;
+  padding: 10px;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.task-sort-button {
+  width: 100%;
+  max-width: 200px;
 }
